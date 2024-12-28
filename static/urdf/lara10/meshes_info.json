@@ -1,0 +1,147 @@
+{
+    "meshes": [
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link0_body.stl",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                -1.57079632679,
+                0.0
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link0_connector.stl",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                -1.57079632679,
+                0.0
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link1_body.stl",
+            "position": [
+                1.2731116161290856e-12,
+                0.0,
+                0.26
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link1_rings.stl",
+            "position": [
+                1.2731116161290856e-12,
+                0.0,
+                0.26
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link2_body.stl",
+            "position": [
+                1.2731116161290856e-12,
+                0.0,
+                0.26
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link3_body.stl",
+            "position": [
+                3.62347152281308e-12,
+                1.763138449586421e-06,
+                0.7399999999967618
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link3_rings.stl",
+            "position": [
+                3.62347152281308e-12,
+                1.763138449586421e-06,
+                0.7399999999967618
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link4_body.stl",
+            "position": [
+                3.62347152281308e-12,
+                1.763138449586421e-06,
+                0.7399999999967618
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link5_body.stl",
+            "position": [
+                6.169694755054073e-12,
+                3.673205103305044e-06,
+                1.2599999999932536
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link5_rings.stl",
+            "position": [
+                6.169694755054073e-12,
+                3.673205103305044e-06,
+                1.2599999999932536
+            ],
+            "rotation": [
+                -1.57079632679,
+                3.673205103416066e-06,
+                1.5707963267948966
+            ]
+        },
+        {
+            "mesh_path": "C:\\labhandler\\labhandler\\static\\urdf\\lara10\\meshes\\Link6_body.stl",
+            "position": [
+                6.169694755054073e-12,
+                3.673205103305044e-06,
+                1.2599999999932536
+            ],
+            "rotation": [
+                -1.57079632680954,
+                -3.673205103416066e-06,
+                -1.5707936732051033
+            ]
+        }
+    ]
+}

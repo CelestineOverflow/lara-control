@@ -1,0 +1,20 @@
+{
+    "trays": {
+        "default": {
+            "origin": [0.0, 0.0, 0.0],
+            "rotation_quaternion": [0.0, 0.0, 0.0, 1.0],
+            "offset_x": -0.016,
+            "offset_y": 0.0146,
+            "rows": 21,
+            "columns": "ABCDEFGH"
+        },
+        "custom_tray": {
+            "origin": [0.1, 0.2, 0.0],
+            "rotation_quaternion": [0.0, 0.0, 0.7071, 0.7071],
+            "offset_x": -0.020,
+            "offset_y": 0.018,
+            "rows": 15,
+            "columns": "ABCD"
+        }
+    }
+ }
