@@ -9,35 +9,63 @@ from typing import List
 from tray import Tray
 from space import Euler, Vector3, Vector2, Quaternion, PoseCartesian, Pose
 import numpy as np
-from lara import Lara
+# from lara import Lara
 import os
 from plunger import Plunger
 from scipy.spatial.transform import Rotation as R
 import json
 import udp_server as udp
+import threading
 import time 
 
 serial_handler = None
 json_data = None
 udp_server = None
+reader_thread = None
+json_data_consumed = False
+first_data_json = None
+stop_event = threading.Event()
+
+def reader():
+    global serial_handler, json_data, json_data_consumed, first_data_json
+    serial_handler.write('{"connected": 1}')
+    while not stop_event.is_set():
+        if serial_handler and not serial_handler.output.empty():
+            json_data = serial_handler.output.get()
+            print(json_data)
+            if not first_data_json:
+                first_data_json = json_data
+            json_data_consumed = False
+        time.sleep(0.001)  # Prevent tight loop, adjust as needed
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global serial_handler, udp_server
-    serial_handler = Plunger("COM13", 115200)
+    global serial_handler, udp_server, reader_thread, stop_event
+    serial_handler = Plunger("COM9", 115200)
     serial_handler.start()
-    # Start the UDP server+
+    
+    # Start the UDP server
     udp_server = udp.UDPServer(
         ip='localhost',
         port=8765,
         buffer_size=1024,
     )
-    yield
-    # Clean up the 
-    serial_handler.stop()
+
+    # Start the reader thread
+    stop_event.clear()
+    reader_thread = threading.Thread(target=reader, daemon=True)
+    reader_thread.start()
+
+    try:
+        yield
+    finally:
+        # Stop the reader thread and clean up
+        stop_event.set()
+        if reader_thread:
+            reader_thread.join()
+        serial_handler.stop()
 
 app = FastAPI(lifespan=lifespan)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins
@@ -46,8 +74,8 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-lara = Lara()
-
+# lara = Lara()
+lara = None
 robotJoints = {
     "joint1": 0,
     "joint2": 0,
@@ -91,23 +119,29 @@ def read_root():
 is_paused = False
 threshold = 3000.0
 force = 0.0
+
+
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    global lara, serial_handler, json_data, threshold, is_paused, force
+    global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json
     await websocket.accept()
+    #send the first data json to the client
+    if first_data_json:
+        print("Sending first data json" + str(first_data_json))
+        await websocket.send_json(first_data_json)
     while True:
-        if not serial_handler.output.empty():
-            json_data = serial_handler.output.get()
-            #add field to json_data to indicate if the robot is paused
+        if not json_data_consumed and json_data is not None:
             json_data["is_paused"] = is_paused
             if "force" in json_data:
                 force = float(json_data["force"])
-                if force > threshold:
+                if force > threshold and lara is not None:
                     lara.robot.pause()
                     is_paused = True
             await websocket.send_json(json_data)
-        await asyncio.sleep(0.1)
-
+            await asyncio.sleep(0.01)
+            json_data_consumed = True
 
 @app.post("/setPause")
 def set_pause(pause: bool):
@@ -423,6 +457,10 @@ def move_to_cell(row: int = 0, col: int = 0, speed: float = 0.1, acceleration: f
 def move_to_socket():
     global lara, socket_pose, json_data
     move_to_pose(socket_pose)
+    
+def move_to_tag():
+    #trow error not implemented
+    pass
 
 @app.post("/moveToSocketTracked")
 def move_to_socket_tracked():
@@ -685,6 +723,24 @@ def toggle_pump(boolean : bool):
     serial_handler.write(f'{{"pump": {100 if boolean else 0}}}')
     return {"pump": 100 if boolean else 0}
 
+
+
+class LedStateModel(BaseModel):
+    leds: List[int]  # or List[bool], depending on your usage
+
+@app.post("/setLeds")
+def set_leds(led_data: LedStateModel):
+    """
+    Just sets the LED states in one shot.
+    Example payload:
+    {
+      "leds": [1, 0, 1, 1, 0, 1, 0]
+    }
+    """
+    payload = {"leds": led_data.leds}
+    serial_handler.write(json.dumps(payload))  # Chuck it to the microcontroller
+    return payload
+
 @app.post("/get_camera_data")
 def get_camera_data():
     global udp_server
@@ -692,16 +748,22 @@ def get_camera_data():
     return {"data": data}
 
 @app.post("/setBrightness")
-def toggle_pump(newBrightness : int):
+def set_brightness(newBrightness : int):
     global serial_handler
     serial_handler.write(f'{{"brightness": {newBrightness}}}')
     return {"brightness": newBrightness}
 
-@app.post("/setHeater")
-def toggle_pump(newHeat : int):
+@app.post("/setHSL")
+def set_hsl(hue : float, sat : float, light : float):
     global serial_handler
-    serial_handler.write(f'{{"heater": {newHeat}}}')
-    return {"heater": newHeat}
+    serial_handler.write(f'{{"hue": {hue}, "sat": {sat}, "light": {light}}}')
+    return {"hue": hue, "sat": sat, "light": light}
+
+@app.post("/setHeater")
+def setHeater(newHeat : int):
+    global serial_handler
+    serial_handler.write(f'{{"setTemp": {newHeat}}}')
+    return {"setTemp": newHeat}
 
 
 @app.post("/TurnJogOff")

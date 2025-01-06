@@ -1,4 +1,5 @@
 <script>
+    import CameraControl from '$lib/CameraControl.svelte';
     import CartesianPad from '$lib/CartesianPad.svelte';
     import PressureChart from '$lib/components/pressureChart.svelte';
     import TemperatureChart from '$lib/components/temperatureChart.svelte';
@@ -27,6 +28,7 @@ import { Pane, Splitpanes } from 'svelte-splitpanes';
   </Pane>
   <Pane>
     <Serial/>
+    <CameraControl />
     <Tray/>
     <LaraSettings/>
     <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" on:click={setTray}>

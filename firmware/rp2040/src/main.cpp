@@ -1,231 +1,444 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_MAX31865.h>
+#include "Adafruit_MAX31865.h"
 #include <ArduinoJson.h>
 #include <NeoPixelBus.h>
-#define RREF 402.0
-#define RNOMINAL 100.0
-#define pump_pwm 9
-#define fan_pwm 5
-#define heater_pwm 12
-#define DYLY_LOADCELL
-#define HX717_SCK 10
-#define HX717_DOUT 11
-#if defined(DYLY_LOADCELL)
-#define SCALE_CALIBRATION_FACTOR 231.0983
-#define SCALE_CALIBRATION_OFFSET -25000.00
-#define SK6812_PIN 18
-#endif
-Adafruit_MAX31865 thermo = Adafruit_MAX31865(1, 0, 3, 2); // Adjusted SPI pins
-int pump_percentage = 0;
-int fan_percentage = 0;
+#include "HX71708.h"
+
+#define RREF         402.0
+#define RNOMINAL     100.0
+#define pump_pwm     9
+#define fan_pwm      5
+#define heater_pwm   12
+#define SK6812_PIN   18
+
+// Temperature boundaries
+#define MIN_TEMP     -60.0
+#define MAX_TEMP     250.0
+
+// PID constants
+float Kp = 20.0, Ki = 0.2, Kd = 5.0;
+
+// Setpoint
+float setTemperature = 0.0;
+bool  hasSetTemp     = false;
+
+// PID terms
+float integralTerm   = 0.0;
+float lastError      = 0.0;
+unsigned long lastPidTime = 0;
+
+bool reportStateFlag = false;
+
+
+float lastTemp = 0.0;
+Adafruit_MAX31865 thermo = Adafruit_MAX31865(1, 0, 3, 2);
+
+int pump_percentage   = 0;
+int fan_percentage    = 0;
 int heater_percentage = 0;
+
 #define LED_COUNT 7
+bool ledState[LED_COUNT] = {true, true, true, true, true, true, true};
 
+// *** We store the color that each LED should have when it's on. ***
 NeoPixelBus<NeoGrbFeature, NeoWs2812xMethod> strip(LED_COUNT, SK6812_PIN);
-#define colorSaturation 255
+RgbColor savedColor[LED_COUNT]; // Each LED’s saved color
 
-RgbColor red(colorSaturation, 0, 0);
-RgbColor green(0, colorSaturation, 0);
-RgbColor blue(0, 0, colorSaturation);
-RgbColor white(colorSaturation);
-RgbColor black(0);
+// Thermal runaway check
+static const unsigned long THERMAL_RUNAWAY_CHECK_INTERVAL = 30000;
+static const float DELTA_IMPROVEMENT_THRESHOLD = 3.0;
+static const float STABLE_THRESHOLD            = 5.0;
 
-HslColor hslRed(red);
-HslColor hslGreen(green);
-HslColor hslBlue(blue);
-HslColor hslWhite(white);
-HslColor hslBlack(black);
+unsigned long lastRunawayCheckTime  = 0;
+float         lastRunawayCheckDelta = 0.0;
 
-
-#define FIFO_SIZE 10
-float fifo[FIFO_SIZE];
+int  errorCode             = 0;
+bool thermalRunawayCleared = false;
+#define ERR_NONE            0
+#define ERR_THERMAL_RUNAWAY 1
 
 
-float readHX71708()
-{
-  if (digitalRead(HX717_DOUT) == LOW)
-  {
-    delayMicroseconds(10);
-    long reading = 0; 
-    for (int i = 0; i < 24; i++)
-    {
-      // Most significant bit first
-      digitalWrite(HX717_SCK, HIGH);
-      delayMicroseconds(1);
-      digitalWrite(HX717_SCK, LOW);
-      reading = reading << 1;
-      reading = reading | digitalRead(HX717_DOUT);
+// Global "previous" state tracking
+static int   oldPump   = -1;
+static int   oldFan    = -1;
+static float oldForce  = NAN;
+
+// For temperature objects, we might track each sub-field separately
+static float oldTemp   = NAN;
+static bool  oldHasSetTemp = false;
+static float oldSetTemp    = NAN;
+
+// Track LED states for change detection
+static bool  oldLedState[LED_COUNT] = {false, false, false, false, false, false, false};
+
+
+// Quick brightness function
+void changeBrightness(int brightness) {
+  // Just modifies each LED’s brightness if it’s “on”
+  for (int i = 0; i < LED_COUNT; i++) {
+    if (ledState[i]) {
+      // Convert saved color to HSB, change only brightness
+      HsbColor hsb(savedColor[i]);
+      hsb.B = (float)brightness / 255.0f; 
+      RgbColor newCol(hsb);
+      savedColor[i] = newCol;  // Keep the new brightness in savedColor
+      strip.SetPixelColor(i, newCol);
+    } else {
+      // LED is off, keep it off
+      strip.SetPixelColor(i, RgbColor(0, 0, 0));
     }
-    // Sign extend if necessary
-    if (reading & 0x800000)
-    {                        // Check if the 24th bit is 1 (negative)
-      reading |= 0xFF000000; // Extend sign for correct 32-bit representation
-    }
-    // Extra pulses to finish reading cycle
-    for (int i = 0; i < 4; i++)
-    {
-      digitalWrite(HX717_SCK, HIGH);
-      delayMicroseconds(1);
-      digitalWrite(HX717_SCK, LOW);
-    }
-    return ((reading + SCALE_CALIBRATION_OFFSET) / SCALE_CALIBRATION_FACTOR);
-  }
-  return NAN; 
-}
-
-void changeBrightness(int brightness)
-{
-  for (int i = 0; i < LED_COUNT; i++)
-  {
-    RgbColor newColor(brightness);
-    strip.SetPixelColor(i, newColor);
-    strip.Show();
   }
   strip.Show();
 }
 
-void reportState()
-{
-  StaticJsonDocument<256> doc;
-  doc["pump"] = pump_percentage;
-  doc["fan"] = fan_percentage;
-  doc["heater"] = heater_percentage;
-  doc["force"] = fifo[0];
-  doc["temperature"] = thermo.temperature(RNOMINAL, RREF);
-  // doc["temperature"] = 24.5;
-  serializeJson(doc, Serial);
-  Serial.println();
+// Convert HSL to RGB for NeoPixelBus
+void setHSL(float hue, float sat, float light) {
+  // We apply the same color to all LEDs that are turned “on”.
+  HsbColor hsb(hue / 360.0f, sat / 100.0f, light / 100.0f);
+  RgbColor rgb(hsb);
+
+  // Update savedColor for each LED that’s on, but leave off ones black.
+  for (int i = 0; i < LED_COUNT; i++) {
+    if (ledState[i]) {
+      savedColor[i] = rgb; 
+      strip.SetPixelColor(i, rgb);
+    } else {
+      strip.SetPixelColor(i, RgbColor(0, 0, 0));
+    }
+  }
+  strip.Show();
 }
-void processCommand()
-{
-  if (Serial.available() > 0)
-  {
-    String command = Serial.readStringUntil('\n');
-    command.trim(); // Remove any leading/trailing whitespace
-    StaticJsonDocument<256> doc;
-    DeserializationError error = deserializeJson(doc, command);
-    if (error)
-    {
-      Serial.print("deserializeJson() failed: ");
-      Serial.println(error.c_str());
-      return;
-    }
-    // Check and set PWM values based on the JSON keys
-    if (doc.containsKey("pump"))
-    {
-      int pump_value = doc["pump"];
-      pump_value = constrain(pump_value, 0, 100);
-      pump_percentage = pump_value;
-      analogWrite(pump_pwm, map(pump_value, 0, 100, 0, 255));
-    }
-    if (doc.containsKey("heater"))
-    {
-      int heater_value = doc["heater"];
-      heater_value = constrain(heater_value, 0, 100);
-      heater_percentage = heater_value;
-      analogWrite(heater_pwm, map(heater_value, 0, 100, 0, 255));
-    }
-    if (doc.containsKey("fan"))
-    {
-      int fan_value = doc["fan"];
-      fan_value = constrain(fan_value, 0, 100);
-      fan_percentage = fan_value;
-      analogWrite(fan_pwm, map(fan_value, 0, 100, 0, 255));
-    }
-    if (doc.containsKey("brightness"))
-    {
-      int brightness = doc["brightness"];
-      brightness = constrain(brightness, 0, 255);
-      changeBrightness(brightness);
-    }
-    // Send back a response upon completion
-    StaticJsonDocument<128> responseDoc;
-    responseDoc["status"] = "ok";
-    serializeJson(responseDoc, Serial);
+
+void controlTemperature(float currentTemp) {
+  unsigned long currentTime = millis();
+  float dt = (currentTime - lastPidTime) / 1000.0f;
+  lastPidTime = currentTime;
+  if (dt <= 0.0f) return;
+
+  float error = setTemperature - currentTemp;
+  integralTerm += (error * dt);
+  //clamp integral term to prevent windup
+  if (integralTerm > 100) integralTerm = 100;
+  if (integralTerm < 0)   integralTerm = 0;
+  float derivative = (error - lastError) / dt;
+  float output = (Kp * error) + (Ki * integralTerm) + (Kd * derivative);
+  lastError = error;
+
+  if (output < 0)   output = 0;
+  if (output > 100) output = 100;
+
+  heater_percentage = (int)output;
+  analogWrite(heater_pwm, map(heater_percentage, 0, 100, 0, 255));
+}
+
+// void checkThermalRunaway() {
+//   float currentDelta = fabs(setTemperature - lastTemp);
+//   if (currentDelta <= STABLE_THRESHOLD) {
+//     lastRunawayCheckTime  = millis();
+//     lastRunawayCheckDelta = currentDelta;
+//     return;
+//   }
+
+//   unsigned long now = millis();
+//   if (now - lastRunawayCheckTime >= THERMAL_RUNAWAY_CHECK_INTERVAL) {
+//     float improvement = lastRunawayCheckDelta - currentDelta;
+//     if (heater_percentage > 0 && improvement < DELTA_IMPROVEMENT_THRESHOLD) {
+//       errorCode = ERR_THERMAL_RUNAWAY;
+//     }
+//     lastRunawayCheckTime  = now;
+//     lastRunawayCheckDelta = currentDelta;
+//   }
+// }
+
+void reportError(int code) {
+  if (code == ERR_THERMAL_RUNAWAY) {
+    DynamicJsonDocument doc(128);
+    doc["error"] = "THERMAL_RUNAWAY";
+    doc["msg"]   = "No significant improvement towards setpoint; heater disabled.";
+    serializeJson(doc, Serial);
     Serial.println();
   }
 }
-void setup()
-{
+
+void handleErrors() {
+  if (errorCode == ERR_NONE) return;
+  heater_percentage = 0;
+  analogWrite(heater_pwm, 0);
+  reportError(errorCode);
+}
+
+void clearError() {
+  errorCode             = ERR_NONE;
+  thermalRunawayCleared = true;
+}
+
+void serial_connected_sequence() {
+  tare();
+  // turn on pump, fan
+  pump_percentage = 100;
+  fan_percentage  = 100;
+  analogWrite(pump_pwm, map(pump_percentage, 0, 100, 0, 255));
+  analogWrite(fan_pwm,  map(fan_percentage,  0, 100, 0, 255));
+
+  for (int i = 0; i < LED_COUNT; i++) {
+    strip.SetPixelColor(i, RgbColor(0, 0, 255));
+    strip.Show();
+    delay(100);
+  }
+  for (int i = 0; i < LED_COUNT; i++) {
+    strip.SetPixelColor(i, RgbColor(0, 255, 0));
+    strip.Show();
+    delay(100);
+  }
+  for (int i = 0; i < LED_COUNT; i++) {
+    strip.SetPixelColor(i, RgbColor(255, 0, 0));
+    strip.Show();
+    delay(100);
+  }
+  changeBrightness(255);
+  pump_percentage = 0;
+  fan_percentage  = 0;
+  analogWrite(pump_pwm, 0);
+  analogWrite(fan_pwm,  0);
+
+}
+bool firstrun = true;
+DynamicJsonDocument start_json(256);
+
+void reportState() {
+  DynamicJsonDocument doc(256);
+  bool somethingChanged = false;
+
+  // 1) Pump
+  if (pump_percentage != oldPump) {
+    doc["pump"] = pump_percentage;   // only send if changed
+    oldPump = pump_percentage;
+    somethingChanged = true;
+  }
+
+  // 2) Fan
+  if (fan_percentage != oldFan) {
+    doc["fan"] = fan_percentage;
+    oldFan = fan_percentage;
+    somethingChanged = true;
+  }
+
+  // 3) Force (load cell reading)
+  float currentForce = readHX71708();
+  // if oldForce is NaN or differs enough from currentForce
+  if (isnan(oldForce) || fabs(oldForce - currentForce) > 0.0001) {
+    doc["force"] = currentForce;
+    oldForce = currentForce;
+    somethingChanged = true;
+  }
+
+  // 4) LED array
+  // We also want to add a “ledChanged” flag if *any* LED differs
+  bool ledChanged = false;
+  for (int i = 0; i < LED_COUNT; i++) {
+    if (oldLedState[i] != ledState[i]) {
+      ledChanged = true;
+      break;
+    }
+  }
+  if (ledChanged) {
+    JsonArray ledArr = doc.createNestedArray("leds");
+    for (int i = 0; i < LED_COUNT; i++) {
+      ledArr.add(ledState[i]);
+      oldLedState[i] = ledState[i];  // update old
+    }
+    // You could also add a separate boolean to indicate that the LED array changed:
+    doc["ledChanged"] = true;
+    somethingChanged = true;
+  }
+
+  // 5) Temperature object (only if there’s new data or something changed)
+  //    We can create a sub-object and only populate changed fields inside it.
+  float temp = thermo.temperature(RNOMINAL, RREF);
+  bool tempObjectNeeded = false;
+  DynamicJsonDocument temperatureObj(64);
+
+  if (!isnan(temp)) {
+    temperatureObj["current"] = temp;
+    temperatureObj["heater"] = heater_percentage;
+    temperatureObj["target"] = setTemperature;
+    oldTemp = temp;
+    tempObjectNeeded = true;
+  }
+
+  // If we needed the sub-object for anything
+  if (tempObjectNeeded) {
+    doc["temperature"] = temperatureObj;
+    somethingChanged = true;
+  }
+
+  // 6) Errors: if you want partial updates for error states as well
+  static int oldFault     = -999;
+  static int oldErrorCode = -999;
+  int faultReading = thermo.readFault();
+  if (faultReading != oldFault || errorCode != oldErrorCode) {
+    JsonObject errors = doc.createNestedObject("errors");
+    errors["fault"]     = faultReading;
+    errors["errorCode"] = errorCode;
+    oldFault     = faultReading;
+    oldErrorCode = errorCode;
+    somethingChanged = true;
+  }
+
+  // 7) If something changed, serialize. If nothing changed, do nothing.
+  if (somethingChanged) {
+    serializeJson(doc, Serial);
+    Serial.println();
+  }
+}
+
+void processCommand() {
+  if (!Serial.available()) return;
+  String command = Serial.readStringUntil('\n');
+  command.trim();
+
+  DynamicJsonDocument doc(256);
+  DeserializationError error = deserializeJson(doc, command);
+  if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  if (!doc["connected"].isNull()) {
+    reportStateFlag = true;
+    Serial.println("Connected! Reporting state...");
+    serial_connected_sequence();
+  }
+
+  if (!doc["pump"].isNull()) {
+    int val = constrain(doc["pump"].as<int>(), 0, 100);
+    pump_percentage = val;
+    analogWrite(pump_pwm, map(val, 0, 100, 0, 255));
+  }
+
+  if (!doc["heater"].isNull()) {
+    int val = constrain(doc["heater"].as<int>(), 0, 100);
+    heater_percentage = val;
+    analogWrite(heater_pwm, map(val, 0, 100, 0, 255));
+  }
+
+  if (!doc["fan"].isNull()) {
+    int val = constrain(doc["fan"].as<int>(), 0, 100);
+    fan_percentage = val;
+    analogWrite(fan_pwm, map(val, 0, 100, 0, 255));
+  }
+
+  // The part that toggles LEDs on/off based on your boolean array
+  if (!doc["leds"].isNull()) {
+    JsonArray leds = doc["leds"].as<JsonArray>();
+    for (int i = 0; i < LED_COUNT; i++) {
+      ledState[i] = leds[i];
+    }
+    // Now apply the saved color if on, or black if off
+    for (int i = 0; i < LED_COUNT; i++) {
+      if (ledState[i]) {
+        strip.SetPixelColor(i, savedColor[i]);
+      } else {
+        strip.SetPixelColor(i, RgbColor(0, 0, 0));
+      }
+    }
+    strip.Show();
+  }
+
+  if (!doc["brightness"].isNull()) {
+    int val = constrain(doc["brightness"].as<int>(), 0, 255);
+    changeBrightness(val);
+  }
+
+  // HSL
+  // If you set a new HSL color, it overwrites the savedColor for each LED that’s on
+  if (!doc["hue"].isNull() && !doc["sat"].isNull() && !doc["light"].isNull()) {
+    float h = doc["hue"].as<float>();
+    float s = doc["sat"].as<float>();
+    float l = doc["light"].as<float>();
+    setHSL(h, s, l);
+  }
+
+  if (!doc["setTemp"].isNull()) {
+    float requestedSetpoint = doc["setTemp"].as<float>();
+    if (requestedSetpoint < MIN_TEMP) requestedSetpoint = MIN_TEMP;
+    if (requestedSetpoint > MAX_TEMP) requestedSetpoint = MAX_TEMP;
+    setTemperature         = requestedSetpoint;
+    hasSetTemp             = true;
+    lastRunawayCheckTime   = millis();
+    lastRunawayCheckDelta  = fabs(setTemperature - lastTemp);
+  }
+
+  if (!doc["Kp"].isNull()) Kp = doc["Kp"].as<float>();
+  if (!doc["Ki"].isNull()) Ki = doc["Ki"].as<float>();
+  if (!doc["Kd"].isNull()) Kd = doc["Kd"].as<float>();
+
+  if (!doc["clearError"].isNull()) {
+    clearError();
+  }
+
+  DynamicJsonDocument responseDoc(128);
+  responseDoc["status"] = "ok";
+  serializeJson(responseDoc, Serial);
+  Serial.println();
+}
+
+void setup() {
   Serial.begin(115200);
   thermo.begin(MAX31865_2WIRE);
-  pinMode(pump_pwm, OUTPUT);
-  pinMode(fan_pwm, OUTPUT);
+  pinMode(pump_pwm,   OUTPUT);
+  pinMode(fan_pwm,    OUTPUT);
   pinMode(heater_pwm, OUTPUT);
-  pinMode(HX717_SCK, OUTPUT);
-  pinMode(HX717_DOUT, INPUT);
-  // Initialize PWM outputs to 0
+  initHX71708();
   analogWrite(pump_pwm, 0);
-  analogWrite(fan_pwm, 0);
-  // analogWrite(heater_pwm, 100);
-  digitalWrite(heater_pwm, LOW);//active high
-  // Initialize SK6812 RGB LED
+  analogWrite(fan_pwm,  0);
+  digitalWrite(heater_pwm, LOW);
   strip.Begin();
-  strip.Show();
-  // Init the fifo with the first reading from hx711
-  for (int i = 0; i < FIFO_SIZE; i++)
-  {
-    while(1){
-      delay(10);
-      float reading = readHX71708();
-      if (!isnan(reading))
-      {
-      fifo[i] = reading;
-      break;
-      }
-
+  // By default, let's store them as white
+  for (int i = 0; i < LED_COUNT; i++) {
+    savedColor[i] = RgbColor(255, 255, 255); 
+    // If ledState[i] is true, turn it on. Otherwise, black.
+    if (ledState[i]) {
+      strip.SetPixelColor(i, savedColor[i]);
+    } else {
+      strip.SetPixelColor(i, RgbColor(0, 0, 0));
     }
-  }
-  for (int i = 0; i < LED_COUNT; i++)
-  {
-    strip.SetPixelColor(i, white);
   }
   strip.Show();
+  lastPidTime          = millis();
+  lastRunawayCheckTime = millis();
 }
 
-float getAverage()
-{
-  float sum = 0;
-  for (int i = 0; i < FIFO_SIZE; i++)
-  {
-    sum += fifo[i];
-  }
-  return sum / FIFO_SIZE;
-}
-
-
-const float threshold = 500.0;
-
-void loop()
-{
-  float _latest = readHX71708();
-  if (!isnan(_latest))
-  {
-    
-    //check the new reading against the previous reading
-    //if the difference is greater than threshold.0, then we have a spike 
-    //and we should ignore the reading
-    float average = getAverage();
-  //shift the values in the fifo
-    for (int i = 0; i < FIFO_SIZE - 1; i++)
-    {
-      fifo[i] = fifo[i + 1];
-    }
-    if (abs(_latest - average) < threshold)
-    {
-      
-      fifo[FIFO_SIZE - 1] = _latest;
-    }
-    else
-    {
-      //add the avg +- threshold value to the fifo
-      bool isPositive = _latest > average;
-      fifo[FIFO_SIZE - 1] = average + (isPositive ? threshold : -threshold);
-    }
-    
-  }
+void loop() {
   processCommand();
-  reportState();
+
+  if (errorCode == ERR_NONE) {
+    float measuredTemp = thermo.temperature(RNOMINAL, RREF);
+    uint8_t fault = thermo.readFault();
+
+    if (fault) {
+      heater_percentage = 0;
+      analogWrite(heater_pwm, 0);
+      thermo.clearFault();
+    } else {
+      if (!isnan(measuredTemp)) {
+        lastTemp = measuredTemp;
+      }
+      if (hasSetTemp && lastTemp >= MIN_TEMP && lastTemp <= MAX_TEMP) {
+        controlTemperature(lastTemp);
+      } else {
+        heater_percentage = 0;
+        analogWrite(heater_pwm, 0);
+      }
+    }
+    // checkThermalRunaway();
+  }
+  if (reportStateFlag) {
+    reportState();
+  }
+  
+  handleErrors();
   delay(1);
 }

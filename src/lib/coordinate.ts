@@ -33,10 +33,7 @@ export const AprilTagWorldPosition: Writable<THREE.Vector3> = writable(new THREE
 
 export const loadcell_value: Writable<number> = writable(0.0);
 export const loadcell_target: Writable<number> = writable(0.0);
-
-export const temperature_value: Writable<number> = writable(0.0);
-export const temperature_target: Writable<number> = writable(0.0);
-
+export const temperature = writable({});
 
 /** Stores a future position for potential use. */
 export const AprilTagInView: Writable<boolean> = writable(false);
@@ -104,7 +101,7 @@ export function connectApi() {
             loadcell_value.set(parseFloat(temp.force));
         }
         if (temp.hasOwnProperty("temperature")) {
-            temperature_value.set(parseFloat(temp.temperature));
+            temperature.set(temp.temperature);
         }
 
         if (temp.hasOwnProperty("is_paused")){
