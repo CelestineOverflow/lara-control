@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { selected } from "$lib/stores/generics";
 </script>
 
 <nav class="bg-gray-900 sticky top-0 z-50">
@@ -7,7 +6,7 @@
     <div class="flex items-center justify-between h-16">
       <!-- Logo Section -->
       <div class="flex items-center">
-        <img src="favicon.png" alt="LabHandler Logo" class="h-8 w-8 mr-2" />
+        <img src="icon.jpg" alt="LabHandler Logo" class="h-8 w-8 mr-2" />
         <span class="text-white font-semibold text-lg">LabHandler</span>
       </div>
 
@@ -16,33 +15,20 @@
         <div class="flex space-x-4">
           <a
             href="/"
-            on:click|preventDefault={() => selected.set(1)}
+            
             class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
             >Dashboard</a
           >
           <a
-            href="/"
-            on:click|preventDefault={() => selected.set(2)}
+            href="/settings"
             class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
             >Settings</a
           >
           <a
-            href="/"
+            href="/docs"
             on:click|preventDefault={() => selected.set(3)}
             class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-            >Usage</a
-          >
-          <a
-            href="/"
-            on:click|preventDefault={() => selected.set(4)}
-            class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-            >Hardware Abstraction Layer</a
-          >
-          <a
-            href="/"
-            on:click|preventDefault={() => selected.set(5)}
-            class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
-            >STRX</a
+            >Docs</a
           >
         </div>
       </div>
