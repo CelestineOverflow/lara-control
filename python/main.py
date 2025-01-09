@@ -9,7 +9,7 @@ from typing import List
 from tray import Tray
 from space import Euler, Vector3, Vector2, Quaternion, PoseCartesian, Pose
 import numpy as np
-# from lara import Lara
+from lara import Lara
 import os
 from plunger import Plunger
 from scipy.spatial.transform import Rotation as R
@@ -17,7 +17,7 @@ import json
 import udp_server as udp
 import threading
 import time 
-
+import logging
 serial_handler = None
 json_data = None
 udp_server = None
@@ -26,13 +26,17 @@ json_data_consumed = False
 first_data_json = None
 stop_event = threading.Event()
 
+
+
+logging.getLogger('lara').setLevel(logging.ERROR)
+
 def reader():
     global serial_handler, json_data, json_data_consumed, first_data_json
     serial_handler.write('{"connected": 1}')
     while not stop_event.is_set():
         if serial_handler and not serial_handler.output.empty():
             json_data = serial_handler.output.get()
-            print(json_data)
+            # print(json_data)
             if not first_data_json:
                 first_data_json = json_data
             json_data_consumed = False
@@ -41,7 +45,7 @@ def reader():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global serial_handler, udp_server, reader_thread, stop_event
-    serial_handler = Plunger("COM9", 115200)
+    serial_handler = Plunger("COM13", 115200)
     serial_handler.start()
     
     # Start the UDP server
@@ -74,8 +78,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-# lara = Lara()
-lara = None
+lara = Lara()
 robotJoints = {
     "joint1": 0,
     "joint2": 0,
@@ -327,7 +330,6 @@ def get_orientation():
 
 
 def rotate_vector(x, y, angle):
-    angle = np.deg2rad(angle)
     x_new = x * np.cos(angle) - y * np.sin(angle)
     y_new = x * np.sin(angle) + y * np.cos(angle)
     return x_new, y_new
@@ -380,74 +382,84 @@ def set_target():
             json.dump(config, f, indent=4)
     return target_camera_translation.to_dict()
 
+pose_correct = False
+
+import math
+def normalized_rotation_speed(current_yaw, target_yaw):
+   """
+   Calculate the normalized rotation speed to move a robot arm towards a target yaw.
+   Args:
+       current_yaw (float): The current yaw angle in radians.
+       target_yaw (float): The target yaw angle in radians.
+   Returns:
+       float: A value between -1 and 1, where:
+              -1 indicates full speed clockwise,
+               1 indicates full speed counter-clockwise,
+               and values closer to 0 indicate proximity to the target angle.
+   """
+   # Calculate the shortest angle difference normalized to [-π, π]
+   angle_difference = math.atan2(math.sin(target_yaw - current_yaw), math.cos(target_yaw - current_yaw))
+   # Normalize to range [-1, 1] based on the angle difference
+   normalized_speed = angle_difference / math.pi  # Divide by π for scaling
+   return normalized_speed
+
 @app.post("/moveToTag")
 async def move_to_tag_jog():
     global lara, json_data, udp_server, target_camera_translation
     message = None
-    pose_correct = False
-    current_camera_translation = Vector3(0, 0, 0)
-    distance = 0.00005
-    current_speed = 0.05 # m/s
-    timeout_ms = 100
-    await lara.set_translation_speed(current_speed)
-    async def send_jog_commands():
-        start_time = current_milli_time()
-        while not pose_correct:
-            lara.robot.jog(set_jogging_external_flag=1)
-            await asyncio.sleep(0.0001)
-            if current_milli_time() - start_time > timeout_ms and not message:
-                break
-            else:
-                start_time = current_milli_time()
-    jog_task = None
-    while not pose_correct:
+    speed = 1  # Initial speed in mm/s
+    # Set initial translation speed
+    await lara.setTranslationSpeedMMs(speed)
+    await asyncio.sleep(0.5)  # Short delay to ensure speed is set
+    vector = Vector3(0, 0, 0)
+    #0.5 x 
+    rot_z = 0
+    while True:
         message = udp_server.receive_data()
         if message:
-            try:
-                current_camera_translation = Vector3(message["0"]["x"], message["0"]["y"], 0)
-                z_height = message["0"]["z"]
-                movement = target_camera_translation + current_camera_translation
-                current_distance = movement.magnitude()
-                if current_distance < 0.01 and current_speed > 0.01:
-                    current_speed = 0.01
-                    await lara.set_translation_speed(current_speed)
-                if current_distance < 0.005 and current_speed > 0.001:
-                    current_speed = 0.001
-                    await lara.set_translation_speed(current_speed)
-                if current_distance < 0.002 and current_speed > 0.0005 and z_height < 0.039:
-                    current_speed = 0.0005
-                    timeout_ms = 1
-                    await lara.set_translation_speed(current_speed)
-                if current_distance < distance and z_height < 0.039:
-                    pose_correct = True
-                    lara.robot.turn_off_jog()
-                    break
-                print(f"Current speed: {current_speed * 1000} mm/s, Current distance: {current_distance * 1000} mm, Z: {z_height}")
-                if not jog_task:
-                    jog_task = asyncio.create_task(send_jog_commands())
-                if jog_task.done():
-                    jog_task = asyncio.create_task(send_jog_commands())
-                x, y = rotate_vector(movement.x, movement.y, -message["0"]["yaw"] * np.pi / 180)
-                if z_height > 0.039 and abs(x) < 0.001 and abs(y) < 0.001:
-                    x = 0
-                    y = 0
-                    z = 0.1
-                else:
-                    x *= 1000
-                    y *= 1000
-                    z = 0
-                lara.robot.turn_on_jog(
-                    jog_velocity=[min(max(x, -1), 1), min(max(y, -1), 1), -z, 0, 0, -message["0"]["yaw"] * np.pi / 180],
-                    jog_type='Cartesian'
-                )
-            except Exception as e:
-                print(e)
-        await asyncio.sleep(0.01)
-    if jog_task:
-        jog_task.cancel()
-    lara.robot.turn_off_jog()
-    return lara.robot.robot_status("jointAngles")
+            vector = Vector3(
+                message['0']['x'] * 1000,  # Convert to mm
+                message['0']['y'] * 1000,  # Convert to mm
+                message['0']['z'] * 1000  # Convert to mm 
+            )
+            quat = Quaternion(
+                message['0']['quaternion']['x'],
+                message['0']['quaternion']['y'],
+                message['0']['quaternion']['z'],
+                message['0']['quaternion']['w']
+            )
+            euler = quat.to_euler()
+            euler_z = euler.z
+            rot_z = normalized_rotation_speed(euler_z, 0)
+            
 
+            # aling with euler first
+            
+            if abs(vector.x) < 1 and abs(vector.y) < 1 and abs(vector.z - 40) < 1:
+                print("Reached target")
+                lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
+                break
+            
+
+            vector.x = max(min(vector.x, 1), -1)
+            vector.y = max(min(vector.y, 1), -1)
+            vector.y = -vector.y
+            if vector.z > 40:
+                vector.z = -0.5
+            else:
+                vector.z = 0
+            a, b = 0, 0
+            c = 0 + 60 * 0.0174533
+            euler = Euler(a, b, c)
+            rot_matrix = euler.to_matrix()
+            vector = rot_matrix @ vector
+        print(f"Moving to {vector.x}, {vector.y}")
+        if rot_z > 0.01 or rot_z < -0.01:
+            await lara.start_movement_slider(0, 0, 0, 0, 0, rot_z)
+        else:
+            await lara.start_movement_slider(vector.x, vector.y, vector.z,0, 0, 0)
+        await asyncio.sleep(0.02)
+    await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
 @app.post("/moveToCell")
 def move_to_cell(row: int = 0, col: int = 0, speed: float = 0.1, acceleration: float = 0.01):
     global lara, socket_pose, json_data
@@ -458,9 +470,6 @@ def move_to_socket():
     global lara, socket_pose, json_data
     move_to_pose(socket_pose)
     
-def move_to_tag():
-    #trow error not implemented
-    pass
 
 @app.post("/moveToSocketTracked")
 def move_to_socket_tracked():

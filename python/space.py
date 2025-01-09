@@ -78,29 +78,55 @@ class Vector2:
    def __str__(self):
        return f"({self.x}, {self.y})"
 class Euler:
-   def __init__(self, x: float, y: float, z: float):
-       # Angles in radians
-       self.x = x  # Rotation around X-axis
-       self.y = y  # Rotation around Y-axis
-       self.z = z  # Rotation around Z-axis
-   def to_list(self) -> List[float]:
-       return [self.x, self.y, self.z]
-   def __str__(self):
-       return f"({self.x}, {self.y}, {self.z})"
-   def to_quaternion(self) -> 'Quaternion':
-       q = R.from_euler('xyz', self.to_list()).as_quat()
-       return Quaternion(*q)
-   @staticmethod
-   def to_rad(deg: float) -> float:
-       return np.deg2rad(deg)
-   @staticmethod
-   def to_deg(rad: float) -> float:
-       return np.rad2deg(rad)
-   def __str__deg(self):
-       x_deg = self.to_deg(self.x)
-       y_deg = self.to_deg(self.y)
-       z_deg = self.to_deg(self.z)
-       return f"({x_deg}°, {y_deg}°, {z_deg}°)"
+    def __init__(self, x: float, y: float, z: float):
+        # Angles in radians
+        self.x = x  # Rotation around X-axis
+        self.y = y  # Rotation around Y-axis
+        self.z = z  # Rotation around Z-axis
+    def to_list(self) -> List[float]:
+        return [self.x, self.y, self.z]
+    def __str__(self):
+        return f"({self.x}, {self.y}, {self.z})"
+    def to_quaternion(self) -> 'Quaternion':
+        q = R.from_euler('xyz', self.to_list()).as_quat()
+        return Quaternion(*q)
+    @staticmethod
+    def to_rad(deg: float) -> float:
+        return np.deg2rad(deg)
+    @staticmethod
+    def to_deg(rad: float) -> float:
+        return np.rad2deg(rad)
+    def __str__deg(self):
+        x_deg = self.to_deg(self.x)
+        y_deg = self.to_deg(self.y)
+        z_deg = self.to_deg(self.z)
+        return f"({x_deg}°, {y_deg}°, {z_deg}°)"
+    def to_matrix(self) -> 'Matrix3':
+        cosA = np.cos(self.x)
+        sinA = np.sin(self.x)
+        cosB = np.cos(self.y)
+        sinB = np.sin(self.y)
+        cosC = np.cos(self.z)
+        sinC = np.sin(self.z)
+        Rx = [
+            [1, 0, 0],
+            [0, cosA, -sinA],
+            [0, sinA, cosA],
+        ]
+        Ry = [
+            [cosB, 0, sinB],
+            [0, 1, 0],
+            [-sinB, 0, cosB],
+        ]
+        Rz = [
+            [cosC, -sinC, 0],
+            [sinC, cosC, 0],
+            [0, 0, 1],
+        ]
+        Rzy = np.matmul(Rz, Ry)
+        R = np.matmul(Rzy, Rx)
+        return Matrix3(R)
+           
 class Quaternion:
    def __init__(self, x: float, y: float, z: float, w: float):
        # Quaternion components
@@ -219,6 +245,8 @@ class Matrix3:
         q = R.from_quat(q.to_list())
         return Matrix3(q.as_matrix())
     
+    def multiplyMatrixAndTransVector(self, vector: Vector3) -> Vector3:
+        return self @ vector
     
 
 class Pose():

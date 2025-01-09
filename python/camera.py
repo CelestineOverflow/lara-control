@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # -------------------- GLOBAL FLAGS --------------------
 
 states = ["normal", "square_detector", "tag_detector"]
-state = states[0]
+state = states[2]
 current_camera_index = 0
 change_camera_flag = False
 
@@ -168,11 +168,11 @@ def square_superimpose(frame):
 # -------------------- Camera Presets --------------------
 camera_presets = {
     1: {
-        'rotate': True,
+        'rotate': False,
         'calibration_path': 'computer_vision/calibration_data.json',
     },
-    3: {
-        'rotate': False,
+    2: {
+        'rotate': True,
         'calibration_path': 'computer_vision/calibration_data_close_up.json',
     }
 }
@@ -288,7 +288,7 @@ def apply_camera_offsets(cam_index, raw_x, raw_y, raw_z):
     corrected_y = raw_y + offset_y
     return corrected_x, corrected_y
 
-def detector_superimpose(img, detector, tag_size=0.01, current_camera_index=0):
+def detector_superimpose(img, detector, tag_size=0.014, current_camera_index=0):
     global last_tag_data
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -344,11 +344,9 @@ def detector_superimpose(img, detector, tag_size=0.01, current_camera_index=0):
         corrected_x, corrected_y = apply_camera_offsets(current_camera_index, raw_x, raw_y, raw_z)
 
         detectionsVectors[d.tag_id] = {
-            "raw_x": raw_x,
-            "raw_y": raw_y,
-            "raw_z": raw_z,
-            "corrected_x": corrected_x,
-            "corrected_y": corrected_y,
+            "x": corrected_x,
+            "y": corrected_y,
+            "z": raw_z,
             "camera": current_camera_index,
             "quaternion": {
                 "x": quat[0],
@@ -377,6 +375,7 @@ def detector_superimpose(img, detector, tag_size=0.01, current_camera_index=0):
             f"roll: {roll:.2f}",
             f"yaw: {yaw:.2f}",
         ]
+        
         for i, text in enumerate(text_lines):
             cv2.putText(
                 img,

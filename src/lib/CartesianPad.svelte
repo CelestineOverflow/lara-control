@@ -2,7 +2,7 @@
     import { setTranslationSpeed, setupSocket, startMovementSlider, stopMovementSlider, max_rotation_speed, max_translation_speed, setRotationalSpeed } from "./robotics/laraapi";
     import { onMount } from "svelte";
     import { loadcell_value, robotJoints } from "./coordinate";
-    import { radToDeg } from "three/src/math/MathUtils.js";
+    import { degToRad, radToDeg } from "three/src/math/MathUtils.js";
     onMount(() => {
         // Connect to the robot API
         setupSocket();
@@ -10,40 +10,8 @@
     let moveInterval: any = null;
     let moveAlongNormal: boolean = false; // Toggle for moving along robot's local axes
 
-    //
-    async function move_until_pressure(value :  number){
-        const loadcell_current_value = $loadcell_value;
 
-        let movementVector = [0, 0, 0]; // [dx, dy, dz]
-
-        if (loadcell_current_value < value){
-            movementVector[2] += 1;
-        }else{
-            movementVector[2] -= 1;
-        }
-
-        // Get the robot's current orientation angles (in radians)
-        let a = $robotJoints.a;
-        let b = $robotJoints.b;
-        let c = $robotJoints.c;
-        let rotationMatrix = eulerToRotationMatrix(a, b, c);
-        // Rotate the movement vector
-        movementVector = multiplyMatrixAndVector(rotationMatrix, movementVector);
-
-        startMovementSlider(
-            movementVector[0],
-            movementVector[1],
-            movementVector[2],
-            0,
-            0,
-            0
-        );
-        //wait 50 ms 
-        await new Promise(r => setTimeout(r, 50));
-        console.log("Pressure: ", $loadcell_value);
-        stopMovementSlider(0, 0, 0, 0, 0, 0);
-    }
-
+    let customC = 60; 
 
     function move(axis: "x" | "y" | "z" | "a" | "b" | "c", direction: 1 | -1) {
         let movementVector = [0, 0, 0]; // [dx, dy, dz]
@@ -58,7 +26,11 @@
                 movementVector[1] +=  direction;
                 break;
             case "z":
-                movementVector[2] +=  direction;
+                if (moveAlongNormal) {
+                    movementVector[2] -=  direction;
+                } else {
+                    movementVector[2] +=  direction;
+                }
                 break;
             case "a":
                 newA +=  direction;
@@ -75,9 +47,9 @@
             // Get the robot's current orientation angles (in radians)
             let a = $robotJoints.a;
             let b = $robotJoints.b;
-            let c = $robotJoints.c;
+            // let c = $robotJoints.c;
+            let c = $robotJoints.c + degToRad(customC);
             let rotationMatrix = eulerToRotationMatrix(a, b, c);
-            // Rotate the movement vector
             movementVector = multiplyMatrixAndVector(rotationMatrix, movementVector);
 
             //
@@ -198,6 +170,18 @@
             max="1000"
             step="1"
             on:input={e => setTransSpeed(parseInt(e.target.value))}
+            class="slider"
+        />
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 bg-indigo-600 bg-opacity-20 rounded">
+        <h3 class="col-span-3">Custom C {customC}°</h3>
+        <input
+            type="range"
+            min="0"
+            max="180"
+            step="1"
+            on:input={e => customC = parseInt(e.target.value)}
             class="slider"
         />
     </div>
