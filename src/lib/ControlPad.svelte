@@ -4,15 +4,12 @@
     let distance_travel: number = 0.0001;
     let rotation_factor: number = 0.0001; // Set a different factor for rotation
     import * as THREE from "three";
-    import { get } from "svelte/store";
     import {
         futurePosition,
-        currentTargetPosition,
         futureRotation,
         AprilTagInView,
         AprilTagRelativePosition,
-    } from "./coordinate";
-    import Apriltag from "./Apriltag.svelte";
+    } from "./coordinate"
 
     let moveInterval: any = null;
     let rotateInterval: any = null;

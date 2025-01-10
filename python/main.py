@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import List
 from tray import Tray
-from space import Euler, Vector3, Vector2, Quaternion, PoseCartesian, Pose
+from space import Euler, Vector3, Quaternion, PoseCartesian, Pose
 import numpy as np
 from lara import Lara
 import os
@@ -18,6 +18,9 @@ import udp_server as udp
 import threading
 import time 
 import logging
+
+# --- Global variables ---
+
 serial_handler = None
 json_data = None
 udp_server = None
@@ -25,8 +28,7 @@ reader_thread = None
 json_data_consumed = False
 first_data_json = None
 stop_event = threading.Event()
-
-
+lara : Lara = None
 
 logging.getLogger('lara').setLevel(logging.ERROR)
 
@@ -36,15 +38,14 @@ def reader():
     while not stop_event.is_set():
         if serial_handler and not serial_handler.output.empty():
             json_data = serial_handler.output.get()
-            # print(json_data)
             if not first_data_json:
                 first_data_json = json_data
             json_data_consumed = False
-        time.sleep(0.001)  # Prevent tight loop, adjust as needed
+        time.sleep(0.001)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global serial_handler, udp_server, reader_thread, stop_event
+    global serial_handler, udp_server, reader_thread, stop_event, lara
     serial_handler = Plunger("COM13", 115200)
     serial_handler.start()
     
@@ -55,7 +56,12 @@ async def lifespan(app: FastAPI):
         buffer_size=1024,
     )
 
-    # Start the reader thread
+    #connect to the robot
+    lara = Lara()
+    await lara.connect_socket()
+    print("Connected to the robot")
+
+    # # Start the reader thread
     stop_event.clear()
     reader_thread = threading.Thread(target=reader, daemon=True)
     reader_thread.start()
@@ -78,37 +84,7 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-lara = Lara()
-robotJoints = {
-    "joint1": 0,
-    "joint2": 0,
-    "joint3": 0,
-    "joint4": 0,
-    "joint5": 0,
-    "joint6": 0,
-    "x": 0,
-    "y": 0,
-    "z": 0,
-    "a": 0,
-    "b": 0,
-    "c": 0,
-}
 
-class RobotJointsModel(BaseModel):
-    joint1: float
-    joint2: float
-    joint3: float
-    joint4: float
-    joint5: float
-    joint6: float
-
-class RobotCartesianModel(BaseModel):
-    x: float
-    y: float
-    z: float
-    a: float
-    b: float
-    c: float
 
 class GenerateTrayRequest(BaseModel):
     offset_x: Optional[float] = 0.0
@@ -122,8 +98,6 @@ def read_root():
 is_paused = False
 threshold = 3000.0
 force = 0.0
-
-
 
 
 @app.websocket("/ws")
@@ -187,69 +161,6 @@ def set_sim_or_emulation(mode: str):
     lara.robot.set_sim_real(mode)
     return {"context": lara.robot.get_sim_or_real()}
 
-@app.post("/pose")
-def pose(pose: RobotJointsModel):
-    global lara
-    joint_property = {
-        "speed": 50.0,
-        "acceleration": 50.0,
-        "safety_toggle": True,
-        "target_joint": [
-            pose.joint1, pose.joint2, pose.joint3, pose.joint4, pose.joint5, pose.joint6
-        ],
-        "current_joint_angles": lara.robot.robot_status("jointAngles")
-    }
-    lara.robot.move_joint(**joint_property)
-    return lara.robot.robot_status("jointAngles")
-
-@app.post("/sendPoseArray")
-def sendPoseArray(poses: List[RobotJointsModel]):
-    global lara
-    joint_property = {
-        "speed": 50.0,
-        "acceleration": 50.0,
-        "safety_toggle": True,
-        "target_joint": [pose for pose in poses],
-        "current_joint_angles": lara.robot.robot_status("jointAngles")
-    }
-    print(joint_property)
-    lara.robot.move_joint(**joint_property)
-    return lara.robot.robot_status("jointAngles")
-
-@app.post("/sendCartesianPoseArray")
-def sendCartesianPoseArray(
-    speed: float,
-    acceleration: float,
-    poses: List[RobotCartesianModel]
-):
-    global lara
-    lara.robot.set_mode("Automatic")
-    linear_property = {
-        "speed": speed,
-        "acceleration": acceleration,
-        "blend_radius": 0.005,
-        "target_pose": [
-            [pose.x, pose.y, pose.z, pose.a, pose.b, pose.c] for pose in poses
-        ],
-        "current_joint_angles": lara.robot.robot_status("jointAngles"),
-        "weaving": False,
-        "pattern": 1,
-        "amplitude": 0.006,
-        "amplitude_left": 0.0,
-        "amplitude_right": 0.0,
-        "frequency": 1.5,
-        "dwell_time_left": 0.0,
-        "dwell_time_right": 0.0,
-        "elevation": 0.0,
-        "azimuth": 0.0
-    }
-
-    lara.robot.move_linear(**linear_property)
-    lara.robot.stop()
-    lara.robot.set_mode("Teach")
-    return lara.robot.robot_status("jointAngles")
-
-
 tray = None
 socket_pose = None
 #try to load tray and socket pose from config.json
@@ -270,7 +181,7 @@ except json.JSONDecodeError:
 @app.post("/setSocket")
 def set_socket():
     global lara, socket_pose, udp_server
-    socket_pose = lara.get_pose()
+    socket_pose = lara.pose
     # Read existing config or initialize empty
     config_path = "config.json"
     if os.path.exists(config_path):
@@ -294,39 +205,33 @@ def set_socket():
         json.dump(config, f, indent=4)
     return socket_pose
 
-@app.post("/setTray")
-def set_tray():
-    global lara, tray
-    current_pose = lara.get_pose()
-    tray = Tray(pose=current_pose)
-    # Read existing config or initialize empty
-    config_path = "config.json"
-    if os.path.exists(config_path):
-        with open(config_path, "r") as f:
-            try:
-                config = json.load(f)
-            except json.JSONDecodeError:
-                config = {}
-    else:
-        config = {}
-    # Update the tray
-    config["tray"] = tray.to_dict()
+# @app.post("/setTray")
+# def set_tray():
+#     global lara, tray
+#     current_pose = lara.pose
+#     tray = Tray(pose=current_pose)
+#     # Read existing config or initialize empty
+#     config_path = "config.json"
+#     if os.path.exists(config_path):
+#         with open(config_path, "r") as f:
+#             try:
+#                 config = json.load(f)
+#             except json.JSONDecodeError:
+#                 config = {}
+#     else:
+#         config = {}
+#     # Update the tray
+#     config["tray"] = tray.to_dict()
 
-    # Write the updated config back to the file
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=4)        
-    return tray.get_cell_positions()
+#     # Write the updated config back to the file
+#     with open(config_path, "w") as f:
+#         json.dump(config, f, indent=4)        
+#     return tray.get_cell_positions()
 
-@app.get("/getTray")
-def get_tray():
-    global tray
-    return tray.get_cell_positions()
-
-
-@app.post("/getOrientation")
-def get_orientation():
-    global lara
-    return lara.get_pose().to_dict()
+# @app.get("/getTray")
+# def get_tray():
+#     global tray
+#     return tray.get_cell_positions()
 
 
 def rotate_vector(x, y, angle):
@@ -410,317 +315,99 @@ async def move_to_tag_jog():
     speed = 1  # Initial speed in mm/s
     # Set initial translation speed
     await lara.setTranslationSpeedMMs(speed)
+    await lara.setRotSpeedDegS(100)
     await asyncio.sleep(0.5)  # Short delay to ensure speed is set
-    vector = Vector3(0, 0, 0)
-    #0.5 x 
-    rot_z = 0
+    #0.5 x
+    counter = 0
+    counter2 = 0
+    rot_z = 1
     while True:
-        message = udp_server.receive_data()
-        if message:
-            vector = Vector3(
-                message['0']['x'] * 1000,  # Convert to mm
-                message['0']['y'] * 1000,  # Convert to mm
-                message['0']['z'] * 1000  # Convert to mm 
-            )
-            quat = Quaternion(
-                message['0']['quaternion']['x'],
-                message['0']['quaternion']['y'],
-                message['0']['quaternion']['z'],
-                message['0']['quaternion']['w']
-            )
-            euler = quat.to_euler()
-            euler_z = euler.z
-            rot_z = normalized_rotation_speed(euler_z, 0)
-            
-
-            # aling with euler first
-            
-            if abs(vector.x) < 1 and abs(vector.y) < 1 and abs(vector.z - 40) < 1:
-                print("Reached target")
-                lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
-                break
-            
-
-            vector.x = max(min(vector.x, 1), -1)
-            vector.y = max(min(vector.y, 1), -1)
-            vector.y = -vector.y
-            if vector.z > 40:
-                vector.z = -0.5
-            else:
-                vector.z = 0
-            a, b = 0, 0
-            c = 0 + 60 * 0.0174533
-            euler = Euler(a, b, c)
-            rot_matrix = euler.to_matrix()
-            vector = rot_matrix @ vector
-        print(f"Moving to {vector.x}, {vector.y}")
-        if rot_z > 0.01 or rot_z < -0.01:
-            await lara.start_movement_slider(0, 0, 0, 0, 0, rot_z)
-        else:
-            await lara.start_movement_slider(vector.x, vector.y, vector.z,0, 0, 0)
-        await asyncio.sleep(0.02)
+        counter += 1
+        # message = udp_server.receive_data()
+        # if message:
+        #     quat = Quaternion(
+        #         message['0']['quaternion']['x'],
+        #         message['0']['quaternion']['y'],
+        #         message['0']['quaternion']['z'],
+        #         message['0']['quaternion']['w']
+        #     )
+        #     rot_z = quat.to_euler().z
+        #     if rot_z < 0.1 and rot_z > -0.1:
+        #         print(f"rot_z = {rot_z}")
+        #         break
+        #     #bound it to -1 to 1
+        #     rot_z = max(min(rot_z, 1), -1)
+  
+        await lara.start_movement_slider(0, 0, 0, 0, 0, -rot_z)
+        await asyncio.sleep(0.05)
+        if counter > 100:
+            print("rot_z = ", rot_z)
+            rot_z = -rot_z
+            counter = 0
+        counter2 += 1
+        if counter2 > 10000:
+            break
     await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
 @app.post("/moveToCell")
-def move_to_cell(row: int = 0, col: int = 0, speed: float = 0.1, acceleration: float = 0.01):
+def move_to_cell(row: int = 0, col: int = 0):
     global lara, socket_pose, json_data
-    move_to_pose(tray.get_cell_robot_orientation(row, col))
+    lara.move_to_pose(tray.get_cell_robot_orientation(row, col))
 
 @app.post("/moveToSocket")
 def move_to_socket():
     global lara, socket_pose, json_data
-    move_to_pose(socket_pose)
-    
+    lara.move_to_pose(socket_pose)
 
-@app.post("/moveToSocketTracked")
-def move_to_socket_tracked():
-    global lara, socket_pose, json_data
-    hover_pose(socket_pose, offset=-0.2)    
-    move_to_tag()
-    current_pose = lara.get_pose()
-
-    move_to_relative(Pose(
-        position=Vector3(
-            x=current_pose.position.x,
-            y=current_pose.position.y,
-            z=current_pose.position.z - 0.1
-        ),
-        orientation=current_pose.orientation
-    ))
-    move_to_tag()
-    current_pose = lara.get_pose()
-    move_to_relative(Pose(
-        position=Vector3(
-            x=current_pose.position.x,
-            y=current_pose.position.y,
-            z=current_pose.position.z - 0.075
-        ),
-        orientation=current_pose.orientation
-    ))
-    move_to_tag()
-    current_pose = lara.get_pose()
-    move_to_relative(Pose(
-        position=Vector3(
-            x=current_pose.position.x,
-            y=current_pose.position.y,
-            z=current_pose.position.z - 0.01
-        ),
-        orientation=current_pose.orientation
-    ))
-    move_to_tag()
-    current_pose = lara.get_pose()
-    move_to_relative(Pose(
-        position=Vector3(
-            x=current_pose.position.x,
-            y=current_pose.position.y,
-            z=current_pose.position.z - 0.01
-        ),
-        orientation=current_pose.orientation
-    ))
-    move_to_tag()
-
-def to_degrees(radians):
-    return radians * 180 / np.pi
-
-def hover_pose(targePose : Pose, offset = -0.3):
-    global lara, json_data
-    # get the current arm position
-    current_pose = lara.get_pose()
-    current_pose_orientation_euler = current_pose.orientation.to_euler(order="xyz")
-    print(f"Current Orientation Euler:  a: {to_degrees(current_pose_orientation_euler.z)}, b: {to_degrees(current_pose_orientation_euler.y)}, c: {to_degrees(current_pose_orientation_euler.x)}")
-    # create steps
-    steps = []
-    # first step is the current position
-    steps.append(PoseCartesian(position=current_pose.position, orientation=current_pose.orientation.to_euler(order="xyz")))
-    print(f"P1: {current_pose.position.x}, {current_pose.position.y}, {current_pose.position.z}, {to_degrees(current_pose_orientation_euler.x)}, {to_degrees(current_pose_orientation_euler.y)}, {to_degrees(current_pose_orientation_euler.z)}")
-    offset = np.array([0, 0, offset])
-    original_form_matrix = R.from_euler("xyz", [current_pose_orientation_euler.z, current_pose_orientation_euler.y, current_pose_orientation_euler.x]).as_matrix()
-    offset_t = original_form_matrix @ offset
-    new_position = Vector3(
-        current_pose.position.x + offset_t[0],
-        current_pose.position.y + offset_t[1],
-        current_pose.position.z + offset_t[2]
-    )
-    # second step is the current position + offset
-    steps.append(PoseCartesian(position=new_position, orientation=current_pose.orientation.to_euler(order="xyz")))
-    # third step is target position + offset
-    target_position = targePose.position
-    target_orientation = targePose.orientation.to_euler(order="xyz")
-    target_orientation_matrix = R.from_euler("xyz", [target_orientation.z, target_orientation.y, target_orientation.x]).as_matrix()
-    offset_t = target_orientation_matrix @ offset
-    new_position = Vector3(
-        target_position.x + offset_t[0],
-        target_position.y + offset_t[1],
-        target_position.z + offset_t[2]
-    )
-    steps.append(PoseCartesian(position=new_position, orientation=target_orientation))
-    lara.robot.set_mode("Automatic")
-    linear_property = {
-        "speed": 0.1,
-        "acceleration": 0.01,
-        "blend_radius": 0.005,
-        "target_pose": [
-            [step.position.x, step.position.y, step.position.z, step.orientation.z, step.orientation.y, step.orientation.x] for step in steps
-        ],
-        "current_joint_angles": lara.robot.robot_status("jointAngles"),
-        "weaving": False,
-        "pattern": 1,
-        "amplitude": 0.006,
-        "amplitude_left": 0.0,
-        "amplitude_right": 0.0,
-        "frequency": 1.5,
-        "dwell_time_left": 0.0,
-        "dwell_time_right": 0.0,
-        "elevation": 0.0,
-        "azimuth": 0.0
-    }
-    
-    lara.robot.move_linear(**linear_property)
-    lara.robot.stop()
-    lara.robot.set_mode("Teach")
-    return lara.robot.robot_status("jointAngles")
-
-def move_to_pose(targePose : Pose):
-    global lara, json_data
-    # get the current arm position
-    current_pose = lara.get_pose()
-    current_pose_orientation_euler = current_pose.orientation.to_euler(order="xyz")
-    print(f"Current Orientation Euler:  a: {to_degrees(current_pose_orientation_euler.z)}, b: {to_degrees(current_pose_orientation_euler.y)}, c: {to_degrees(current_pose_orientation_euler.x)}")
-    # create steps
-    steps = []
-    # first step is the current position
-    steps.append(PoseCartesian(position=current_pose.position, orientation=current_pose.orientation.to_euler(order="xyz")))
-    print(f"P1: {current_pose.position.x}, {current_pose.position.y}, {current_pose.position.z}, {to_degrees(current_pose_orientation_euler.x)}, {to_degrees(current_pose_orientation_euler.y)}, {to_degrees(current_pose_orientation_euler.z)}")
-    offset = np.array([0, 0, -.3])
-    original_form_matrix = R.from_euler("xyz", [current_pose_orientation_euler.z, current_pose_orientation_euler.y, current_pose_orientation_euler.x]).as_matrix()
-    offset_t = original_form_matrix @ offset
-    new_position = Vector3(
-        current_pose.position.x + offset_t[0],
-        current_pose.position.y + offset_t[1],
-        current_pose.position.z + offset_t[2]
-    )
-    # second step is the current position + offset
-    steps.append(PoseCartesian(position=new_position, orientation=current_pose.orientation.to_euler(order="xyz")))
-    # third step is target position + offset
-    target_position = targePose.position
-    target_orientation = targePose.orientation.to_euler(order="xyz")
-    target_orientation_matrix = R.from_euler("xyz", [target_orientation.z, target_orientation.y, target_orientation.x]).as_matrix()
-    offset_t = target_orientation_matrix @ offset
-    new_position = Vector3(
-        target_position.x + offset_t[0],
-        target_position.y + offset_t[1],
-        target_position.z + offset_t[2]
-    )
-    steps.append(PoseCartesian(position=new_position, orientation=target_orientation))
-    # fourth step is the target position
-    steps.append(PoseCartesian(position=target_position, orientation=target_orientation))
-    lara.robot.set_mode("Automatic")
-    linear_property = {
-        "speed": 0.1,
-        "acceleration": 0.01,
-        "blend_radius": 0.005,
-        "target_pose": [
-            [step.position.x, step.position.y, step.position.z, step.orientation.z, step.orientation.y, step.orientation.x] for step in steps
-        ],
-        "current_joint_angles": lara.robot.robot_status("jointAngles"),
-        "weaving": False,
-        "pattern": 1,
-        "amplitude": 0.006,
-        "amplitude_left": 0.0,
-        "amplitude_right": 0.0,
-        "frequency": 1.5,
-        "dwell_time_left": 0.0,
-        "dwell_time_right": 0.0,
-        "elevation": 0.0,
-        "azimuth": 0.0
-    }
-    
-    lara.robot.move_linear(**linear_property)
-    lara.robot.stop()
-    lara.robot.set_mode("Teach")
-    return lara.robot.robot_status("jointAngles")
-
-def move_to_relative(targePose : Pose):
-    global lara, json_data
-    # get the current arm position
-    current_pose = lara.get_pose()
-    current_pose_orientation_euler = current_pose.orientation.to_euler(order="xyz")
-    print(f"Current Orientation Euler:  a: {to_degrees(current_pose_orientation_euler.z)}, b: {to_degrees(current_pose_orientation_euler.y)}, c: {to_degrees(current_pose_orientation_euler.x)}")
-    # create steps
-    steps = []
-    steps.append(PoseCartesian(position=current_pose.position, orientation=current_pose.orientation.to_euler(order="xyz")))
-    steps.append(PoseCartesian(position= targePose.position, orientation=targePose.orientation.to_euler(order="xyz")))
-    lara.robot.set_mode("Automatic")
-    linear_property = {
-        "speed": 0.1,
-        "acceleration": 0.01,
-        "blend_radius": 0.005,
-        "target_pose": [
-            [step.position.x, step.position.y, step.position.z, step.orientation.z, step.orientation.y, step.orientation.x] for step in steps
-        ],
-        "current_joint_angles": lara.robot.robot_status("jointAngles"),
-        "weaving": False,
-        "pattern": 1,
-        "amplitude": 0.006,
-        "amplitude_left": 0.0,
-        "amplitude_right": 0.0,
-        "frequency": 1.5,
-        "dwell_time_left": 0.0,
-        "dwell_time_right": 0.0,
-        "elevation": 0.0,
-        "azimuth": 0.0
-    }
-    
-    lara.robot.move_linear(**linear_property)
-    lara.robot.stop()
-    lara.robot.set_mode("Teach")
-    return lara.robot.robot_status("jointAngles")
-
-@app.post("/set_jogging_speed")
-async def set_jogging_speed(speed: float):
-    global lara
-    await lara.set_translation_speed(speed)
-
-MAX_SPEED = 0.01  # Maximum allowable speed
-DIRECTION = -1  # 1 for up, -1 for down
 
 @app.post("/moveUntilPressure")
-async def move_until_pressure(pressure: float = 1000.0, Kp: float = 0.00001, wiggle_room: float = 300.0):
-    print(f"Pressure: {pressure}, Kp: {Kp}")
-    global lara, DIRECTION
-    i = 0
-    consecutive_within_wiggle = 0
-    while i < 1000:
-        if not serial_handler.output.empty():
-            json_data = serial_handler.output.get()
-            #add field to json_data to indicate if the robot is paused
+async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300.0):
+    global lara, json_data, threshold, force, is_paused
+    print(f"Entering move_until_pressure with pressure={pressure}, wiggle_room={wiggle_room}")
+    await lara.setTranslationSpeedMMs(0.5)
+    print("Set translation speed to 0.5 mm/s")
+    move_z = -1
+    for i in range(1000):
+        print(f"Loop iteration {i+1}/1000")
+        if json_data is not None:
             json_data["is_paused"] = is_paused
+            print("Updated json_data['is_paused']")
             if "force" in json_data:
                 force = float(json_data["force"])
-                error = pressure - force
-                speed = Kp * error
-                speed = max(min(speed, MAX_SPEED), -MAX_SPEED)
-                speed *= DIRECTION
-                # Check if the force is within the wiggle room
-                if abs(error) <= wiggle_room:
-                    consecutive_within_wiggle += 1
-                    if consecutive_within_wiggle >= 20:
-                        lara.robot.turn_off_jog()
-                        break
+                print(f"Current force: {force}")
+                if force > pressure + wiggle_room:
+                    print(f"Force {force} exceeds pressure {pressure} + wiggle_room {wiggle_room}. Breaking loop.")
+                    break
+        if i == 999:
+            print("Force not exceeded after 1000 iterations")
+        await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
+        print(f"Started movement with move_z={move_z}")
+        await asyncio.sleep(0.01)
+    counter = 10
+    for i in range(1000):
+        print(f"Second loop iteration {i+1}/100")
+        if json_data is not None:
+            if "force" in json_data:
+                force = float(json_data["force"])
+                print(f"Current force: {force}")
+                if force > pressure + wiggle_room:
+                    move_z = 0.3
+                    counter = 10
+                    print(f"Force {force} > pressure + wiggle_room. Setting move_z to {move_z} and resetting counter.")
+                    await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
+                elif force < pressure - wiggle_room:
+                    move_z = -0.3
+                    counter = 10
+                    print(f"Force {force} < pressure - wiggle_room. Setting move_z to {move_z} and resetting counter.")
+                    await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
                 else:
-                    consecutive_within_wiggle = 0
-                    # Update jog velocity
-                    lara.robot.turn_off_jog()
-                    lara.robot.turn_on_jog(
-                        jog_velocity=[0, 0, speed, 0, 0, 0],
-                        jog_type='Cartesian'
-                    )
-                    print(f"Force: {force}, Speed: {speed}")
-                    lara.robot.jog(set_jogging_external_flag=1)
-                    i += 1
-                    await asyncio.sleep(0.01)
-    lara.robot.turn_off_jog()
-    return {"force": force, "i": i} 
-    
+                    counter -= 1
+                    print(f"Force within wiggle room. Decrementing counter to {counter}")
+                    if counter == 0:
+                        print("Counter reached zero. Exiting loop.")
+                        break
+            await asyncio.sleep(0.01)
+    await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
+    print("Stopped all movements.")
 @app.post("/EmergencyStop")
 def emergency_stop():
     global lara
@@ -731,8 +418,6 @@ def toggle_pump(boolean : bool):
     global serial_handler
     serial_handler.write(f'{{"pump": {100 if boolean else 0}}}')
     return {"pump": 100 if boolean else 0}
-
-
 
 class LedStateModel(BaseModel):
     leds: List[int]  # or List[bool], depending on your usage
@@ -749,6 +434,13 @@ def set_leds(led_data: LedStateModel):
     payload = {"leds": led_data.leds}
     serial_handler.write(json.dumps(payload))  # Chuck it to the microcontroller
     return payload
+
+@app.get("/orientation_data")
+def get_orientation_data():
+    global lara
+    orientation = lara.pose.orientation.to_euler().to_dict(degrees=True)
+    return orientation
+
 
 @app.post("/get_camera_data")
 def get_camera_data():

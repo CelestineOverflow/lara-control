@@ -55,19 +55,24 @@ export const trayPoses: Writable<Pose[]> = writable([]);
 
 /** Stores current robot joints. */
 export interface RobotJoints {
-    a: any;
-    b: any;
-    c: any;
-    x: any;
-    y: any;
-    z: any;
     joint1: number;
     joint2: number;
     joint3: number;
     joint4: number;
     joint5: number;
     joint6: number;
+    a: any;
+    b: any;
+    c: any;
+    x: any;
+    y: any;
+    z: any;
+    _x: any;
+    _y: any;
+    _z: any;
+    _w: any;
 }
+
 
 export const robotJoints: Writable<RobotJoints> = writable({
     joint1: 0,
@@ -82,6 +87,10 @@ export const robotJoints: Writable<RobotJoints> = writable({
     a: 0,
     b: 0,
     c: 0,
+    _x: 0,
+    _y: 0,
+    _z: 0,
+    _w: 1,
 });
 
 let ws: WebSocket;

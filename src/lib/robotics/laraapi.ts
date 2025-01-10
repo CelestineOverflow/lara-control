@@ -24,24 +24,33 @@ export function setupSocket() {
         console.log("Connected and emitted events.");
     });
 
+    socket.on("heartbeat_check", () => {
+        socket.emit("heartbeat_response", true);
+    });
+
     //Cartesian_Pose
     socket.on("Cartesian_Pose", (data: any) => {
-        // console.log("Cartesian_Pose", data);
         robotJoints.update((joints) => {
-            // console.log("Cartesian_Pose", data);
             const x = parseFloat(data.X);
             const y = parseFloat(data.Y);
             const z = parseFloat(data.Z);
             const a = parseFloat(data.A);
             const b = parseFloat(data.B);
             const c = parseFloat(data.C);
-            //set the new values if they are a number and not NaN and not undefined
+            const _x = parseFloat(data._X);
+            const _y = parseFloat(data._Y);
+            const _z = parseFloat(data._Z);
+            const _w = parseFloat(data._W);
             if (!isNaN(x)) joints.x = x;
             if (!isNaN(y)) joints.y = y;
             if (!isNaN(z)) joints.z = z;
             if (!isNaN(a)) joints.a = a;
             if (!isNaN(b)) joints.b = b;
             if (!isNaN(c)) joints.c = c;
+            if (!isNaN(_x)) joints._x = _x;
+            if (!isNaN(_y)) joints._y = _y;
+            if (!isNaN(_z)) joints._z = _z;
+            if (!isNaN(_w)) joints._w = _w;
             
 
             return joints;
@@ -49,25 +58,13 @@ export function setupSocket() {
     });
     //Joint_Angle
     socket.on("Joint_Angle", (data: any) => {
-        // console.log("Joint_Angle", data);
         robotJoints.update((joints) => {
-            //{
-                // {
-                //     "A1": -1.9135230631734252,
-                //     "A2": 0.334878192586605,
-                //     "A3": 2.1238630630787063,
-                //     "A4": 0.01279765417080765,
-                //     "A5": 0.6417316497390619,
-                //     "A6": -2.2188421650309684
-                // }
-            //}
             const joint1 = parseFloat(data.A1);
             const joint2 = parseFloat(data.A2);
             const joint3 = parseFloat(data.A3);
             const joint4 = parseFloat(data.A4);
             const joint5 = parseFloat(data.A5);
             const joint6 = parseFloat(data.A6);
-            //set the new values if they are a number and not NaN and not undefined
             if (!isNaN(joint1) && joint1 !== undefined) joints.joint1 = joint1;
             if (!isNaN(joint2) && joint2 !== undefined) joints.joint2 = joint2;
             if (!isNaN(joint3) && joint3 !== undefined) joints.joint3 = joint3;

@@ -126,6 +126,18 @@ class Euler:
         Rzy = np.matmul(Rz, Ry)
         R = np.matmul(Rzy, Rx)
         return Matrix3(R)
+    def to_dict(self, degrees=False) -> dict:
+        if degrees:
+            return {
+                "x": self.to_deg(self.x),
+                "y": self.to_deg(self.y),
+                "z": self.to_deg(self.z)
+            }
+        return {
+            "x": self.x,
+            "y": self.y,
+            "z": self.z
+        }
            
 class Quaternion:
    def __init__(self, x: float, y: float, z: float, w: float):
@@ -138,12 +150,12 @@ class Quaternion:
        return [self.x, self.y, self.z, self.w]
    def __str__(self):
        return f"({self.x}, {self.y}, {self.z}, {self.w})"
-   def to_euler(self, order='xyz', degrees=False) -> Euler:
+   def to_euler(self, order='xyz') -> Euler:
        '''
        Returns the Euler angles (in radians) corresponding to this quaternion.
        '''
        r = R.from_quat(self.to_list())
-       return Euler(*r.as_euler(order, degrees=degrees))
+       return Euler(*r.as_euler(order))
 
    def multiply(self, q: 'Quaternion') -> 'Quaternion':
        '''

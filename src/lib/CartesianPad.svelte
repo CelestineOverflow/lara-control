@@ -3,6 +3,7 @@
     import { onMount } from "svelte";
     import { loadcell_value, robotJoints } from "./coordinate";
     import { degToRad, radToDeg } from "three/src/math/MathUtils.js";
+    import * as THREE from "three";
     onMount(() => {
         // Connect to the robot API
         setupSocket();
@@ -11,7 +12,7 @@
     let moveAlongNormal: boolean = false; // Toggle for moving along robot's local axes
 
 
-    let customC = 60; 
+    let customZAngleDeg = 28; 
 
     function move(axis: "x" | "y" | "z" | "a" | "b" | "c", direction: 1 | -1) {
         let movementVector = [0, 0, 0]; // [dx, dy, dz]
@@ -20,46 +21,47 @@
         let newC = 0;
         switch (axis) {
             case "x":
-                movementVector[0] +=  direction;
+                movementVector[0] += direction;
                 break;
             case "y":
-                movementVector[1] +=  direction;
+                movementVector[1] += direction;
                 break;
             case "z":
                 if (moveAlongNormal) {
-                    movementVector[2] -=  direction;
+                    movementVector[2] -= direction;
                 } else {
-                    movementVector[2] +=  direction;
+                    movementVector[2] += direction;
                 }
                 break;
             case "a":
-                newA +=  direction;
+                newA += direction;
                 break;
             case "b":
-                newB +=  direction;
+                newB += direction;
                 break;
             case "c":
-                newC +=  direction;
+                newC += direction;
                 break;
         }
         // If moveAlongNormal is true, rotate the movement vector based on the robot's orientation
         if (moveAlongNormal) {
-            // Get the robot's current orientation angles (in radians)
-            let a = $robotJoints.a;
-            let b = $robotJoints.b;
-            // let c = $robotJoints.c;
-            let c = $robotJoints.c + degToRad(customC);
-            let rotationMatrix = eulerToRotationMatrix(a, b, c);
-            movementVector = multiplyMatrixAndVector(rotationMatrix, movementVector);
+            // Apply custom Z offset rotation to X,Y
+            let angleRad = customZAngleDeg * (Math.PI / 180);
+            let [mx, my, mz] = movementVector;
+            let rotatedX = mx * Math.cos(angleRad) - my * Math.sin(angleRad);
+            let rotatedY = mx * Math.sin(angleRad) + my * Math.cos(angleRad);
+            movementVector = [rotatedX, rotatedY, mz];
 
-            //
-            let debugVector = multiplyMatrixAndVector(rotationMatrix, [0, 0, 1]);
-            //to deg
-            console.log("Debug A: ", a * 180 / Math.PI);
-            console.log("Debug B: ", b * 180 / Math.PI);
-            console.log("Debug C: ", c * 180 / Math.PI);
-            console.log("Debug Vector: ", debugVector);
-            
+            let quat = new THREE.Quaternion($robotJoints._x, $robotJoints._y, $robotJoints._z, $robotJoints._w);
+            let rotationMatrix = new THREE.Matrix4();
+            rotationMatrix.makeRotationFromQuaternion(quat);
+            let rotationMatrix3x3 = [
+                [rotationMatrix.elements[0], rotationMatrix.elements[1], rotationMatrix.elements[2]],
+                [rotationMatrix.elements[4], rotationMatrix.elements[5], rotationMatrix.elements[6]],
+                [rotationMatrix.elements[8], rotationMatrix.elements[9], rotationMatrix.elements[10]]
+            ];
+            let rotatedMovementVector = multiplyMatrixAndVector(rotationMatrix3x3, movementVector);
+            movementVector = rotatedMovementVector;
         }
         // Use the adjusted movement vector
         startMovementSlider(
@@ -175,13 +177,13 @@
     </div>
 
     <div class="grid grid-cols-2 gap-3 bg-indigo-600 bg-opacity-20 rounded">
-        <h3 class="col-span-3">Custom C {customC}°</h3>
+        <h3 class="col-span-3">Custom C {customZAngleDeg}°</h3>
         <input
             type="range"
             min="0"
             max="180"
             step="1"
-            on:input={e => customC = parseInt(e.target.value)}
+            on:input={e => customZAngleDeg = parseInt(e.target.value)}
             class="slider"
         />
     </div>

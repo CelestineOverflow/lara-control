@@ -433,12 +433,11 @@ void loop() {
         analogWrite(heater_pwm, 0);
       }
     }
-    // checkThermalRunaway();
   }
   if (reportStateFlag) {
     reportState();
   }
-  
+  // reportState();
   handleErrors();
   delay(1);
 }
