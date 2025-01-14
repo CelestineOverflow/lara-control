@@ -348,12 +348,9 @@ async def aling_z_axis():
     await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
 
 
-@app.post("/computePose")
-async def compute():
+@app.post("/AlignToTag")
+async def align_to_tag(offsetx: float = 0, offsety: float = 0, offsetz: float = 0):
     global lara, udp_server
-    speed = 1  # Initial speed in mm/s
-    await lara.setTranslationSpeedMMs(speed)
-    await lara.setRotSpeedDegS(100)
     current_movement_vector = Vector3(0, 0, 0)
     current_rotation_vector = Vector3(0, 0, 0)
     while True:
@@ -397,24 +394,38 @@ async def compute():
             # 8) Move the robot to the desired position using the delta translation
             # rotation
             rot_z = delta_q.to_euler().z
-            if not (rot_z < 0.1 and rot_z > -0.1):
+            if not (rot_z < 0.01 and rot_z > -0.01):
                 await lara.start_movement_slider(0, 0, 0, 0, 0, -1 if rot_z > 0 else 1)
                 continue # Skip the translation if the rotation is not aligned
             # translation
-            if delta_t.x < -0.001:
-                current_movement_vector.x = 1.0
-            elif delta_t.x > 0.001:
-                current_movement_vector.x = -1.0
-            else:
+            fine_tune_speed = 0.1
+            normal_speed = 1.0
+            Kp = 100.0
+
+            # X movement
+            err_x = delta_t.x
+            if abs(err_x) < 0.0001:
                 current_movement_vector.x = 0
-            
-            if delta_t.y < -0.001:
-                current_movement_vector.y = 1.0
-            elif delta_t.y > 0.001:
-                current_movement_vector.y = -1.0
             else:
+                proportional_speed_x = -Kp * err_x
+                if abs(proportional_speed_x) < fine_tune_speed:
+                    proportional_speed_x = fine_tune_speed if proportional_speed_x > 0 else -fine_tune_speed
+                elif abs(proportional_speed_x) > normal_speed:
+                    proportional_speed_x = normal_speed if proportional_speed_x > 0 else -normal_speed
+                current_movement_vector.x = proportional_speed_x
+
+            # Y movement
+            err_y = delta_t.y
+            if abs(err_y) < 0.0001:
                 current_movement_vector.y = 0
-            if abs(delta_t.x) < 0.001 and abs(delta_t.y) < 0.001:
+            else:
+                proportional_speed_y = -Kp * err_y
+                if abs(proportional_speed_y) < fine_tune_speed:
+                    proportional_speed_y = fine_tune_speed if proportional_speed_y > 0 else -fine_tune_speed
+                elif abs(proportional_speed_y) > normal_speed:
+                    proportional_speed_y = normal_speed if proportional_speed_y > 0 else -normal_speed
+                current_movement_vector.y = proportional_speed_y
+            if abs(delta_t.x) < (0.05 / 1000) and abs(delta_t.y) < (0.05 / 1000):
                 print("Reached target position")
                 break
             await lara.start_movement_slider(current_movement_vector.x, current_movement_vector.y, 0, 0, 0, 0)
