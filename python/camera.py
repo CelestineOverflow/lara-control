@@ -304,9 +304,9 @@ def detector_superimpose(img, detector, tag_size=0.014, current_camera_index=0):
 
     h, w, _ = img.shape
     center_x, center_y = w // 2, h // 2
-    cv2.line(img, (center_x, 0), (center_x, h), (255, 255, 255), 1)
-    cv2.line(img, (0, center_y), (w, center_y), (255, 255, 255), 1)
-    cv2.circle(img, (center_x, center_y), 10, (255, 255, 255), 1)
+    cv2.line(img, (center_x, 0), (center_x, h), (255, 255, 255), 2)
+    cv2.line(img, (0, center_y), (w, center_y), (255, 255, 255), 2)
+    cv2.circle(img, (center_x, center_y), 20, (255, 255, 255), 2)
 
     camera_matrix = np.array([
         [mtx[0], 0,      mtx[2]],
@@ -337,15 +337,13 @@ def detector_superimpose(img, detector, tag_size=0.014, current_camera_index=0):
         rmat, tvec = d.pose_R, d.pose_t
         quat = Rotation.from_matrix(rmat).as_quat()
 
-        raw_x = tvec[0][0]
-        raw_y = tvec[1][0]
+        raw_y = -tvec[0][0]
+        raw_x = -tvec[1][0]
         raw_z = tvec[2][0]
 
-        corrected_x, corrected_y = apply_camera_offsets(current_camera_index, raw_x, raw_y, raw_z)
-
         detectionsVectors[d.tag_id] = {
-            "x": corrected_x,
-            "y": corrected_y,
+            "x": raw_x,
+            "y": raw_y,
             "z": raw_z,
             "camera": current_camera_index,
             "quaternion": {
@@ -368,9 +366,9 @@ def detector_superimpose(img, detector, tag_size=0.014, current_camera_index=0):
 
         pitch, roll, yaw = Rotation.from_matrix(rmat).as_euler('xyz')
         text_lines = [
-            f"raw_x: {raw_x*1000:.2f} mm -> corr_x: {corrected_x*1000:.2f} mm",
-            f"raw_y: {raw_y*1000:.2f} mm -> corr_y: {corrected_y*1000:.2f} mm",
-            f"raw_z: {raw_z*1000:.2f} mm",
+            f"x: {raw_x*1000:.2f} mm",
+            f"y: {raw_y*1000:.2f} mm",
+            f"z: {raw_z*1000:.2f} mm",
             f"pitch: {pitch:.2f}",
             f"roll: {roll:.2f}",
             f"yaw: {yaw:.2f}",
@@ -651,7 +649,7 @@ def camera_loop():
                 frame, binary_mask = square_superimpose(frame)
             elif state == "tag_detector":
                 frame, detections = detector_superimpose(
-                    frame, at_detector, 0.01, camera_indices[current_camera_index]
+                    frame, at_detector, 0.0115582191781, camera_indices[current_camera_index]
                 )
                 send_udp_data(detections)
 

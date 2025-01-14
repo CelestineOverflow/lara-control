@@ -65,6 +65,9 @@ class Vector3:
         for j in range(3):
             result[i] += other.data[i][j] * self.to_list()[j]
     return Vector3(*result)
+   #Rotate vector by quaternion
+   def rotate(self, q: 'Quaternion') -> 'Vector3':
+        return q.rotate_vector(self)
    
 
 class Vector2:

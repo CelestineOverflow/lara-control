@@ -369,22 +369,14 @@ async def aling_xy():
     return {"position": lara.pose.position.to_dict()}
 
 
-@app.post("/align")
-async def align():
+@app.post("/computePose")
+async def compute():
    global lara, udp_server
-   # We might define these for clarity, but it's up to you how you store them
-   # speed in mm/s, error threshold in mm, etc.
-   speed_mm_s = 1
-   rotation_speed_deg_s = 100
-   positional_tolerance = 0.1  # mm
-   await lara.setTranslationSpeedMMs(speed_mm_s)
-   await lara.setRotSpeedDegS(rotation_speed_deg_s)
    while True:
         message = udp_server.receive_data()
         if not message:
             continue
         # 1) Build the detected pose (tag in camera frame) from the data
-        #    “message["0"]” is presumably your dictionary with pose info
         position = Vector3(
             message["0"]["x"],
             message["0"]["y"],
@@ -397,37 +389,33 @@ async def align():
             message["0"]["quaternion"]["w"]
         )
         detected_pose = Pose(position, quaternion)
-        # 2) Camera offset pose (placeholder is identity)
-        #    In real usage, fill with the actual offset from robot end-effector to camera
+        # 2) Camera offset pose
         offset_camera_pose = Pose(
             position=Vector3(0, 0, 0),
             orientation=Quaternion(0, 0, 0, 1)
         )
-        # 3) Current robot pose in the world (already known from your "lara.pose"?)
-        lara_global_pose = lara.pose  # Pose of robot end-effector in world
+        # 3) Current robot pose in the world
+        lara_global_pose = lara.pose
         # ---- Convert to 4x4 transforms ----
         T_robot_world   = Matrix4.from_pose(lara_global_pose)    # Robot in world
         T_camera_robot  = Matrix4.from_pose(offset_camera_pose)   # Camera in robot
         T_tag_camera    = Matrix4.from_pose(detected_pose)        # Tag in camera
-        # 4) Compute T_tag_world = T_robot_world * T_camera_robot * T_tag_camera
+        # 4) Compute T_tag_world
         T_tag_world = T_robot_world * T_camera_robot * T_tag_camera
         # 5) For a simple “align” scenario, let’s say we want the end-effector exactly where the tag is
-        #    (i.e., no approach offset). So the desired end-effector in world = T_tag_world
         T_robot_world_desired = T_tag_world
         # 6) Compute the delta transform from the robot’s current pose to the desired
         T_delta = T_robot_world.inverse() * T_robot_world_desired
         # 7) Extract the translation + rotation from T_delta
         delta_q, delta_t = T_delta.to_quaternion_translation()
-        delta_euler = delta_q.to_euler(order='xyz')  # returns Euler(x, y, z) in radians
+        # Custom offset 
+        Offset = Euler(0.0, 0.0, Euler.to_rad(-24)).to_quaternion()
+        delta_t = delta_t.rotate(Offset)
+        delta_euler = delta_q.to_euler(order='xyz')
         # Convert radians to degrees 
         delta_rx_deg = np.degrees(delta_euler.x)
         delta_ry_deg = np.degrees(delta_euler.y)
         delta_rz_deg = np.degrees(delta_euler.z)
-        # 8) check if we’re within some positional tolerance
-        dist_mm = delta_t.magnitude() * 1000.0
-        if dist_mm < positional_tolerance:
-            print("Tag is close enough, stopping alignment loop.")
-            break
         p = {
             "x": delta_t.x * 1000,
             "y": delta_t.y * 1000,
@@ -436,8 +424,7 @@ async def align():
             "ry": delta_ry_deg,
             "rz": delta_rz_deg
         }
-        print(f"Moving to {p}")
-        break
+        return p
 
 @app.post("/moveToCell")
 def move_to_cell(row: int = 0, col: int = 0):
