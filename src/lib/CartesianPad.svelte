@@ -45,13 +45,6 @@
         }
         // If moveAlongNormal is true, rotate the movement vector based on the robot's orientation
         if (moveAlongNormal) {
-            // Apply custom Z offset rotation to X,Y
-            let angleRad = customZAngleDeg * (Math.PI / 180);
-            let [mx, my, mz] = movementVector;
-            let rotatedX = mx * Math.cos(angleRad) - my * Math.sin(angleRad);
-            let rotatedY = mx * Math.sin(angleRad) + my * Math.cos(angleRad);
-            movementVector = [rotatedX, rotatedY, mz];
-
             let quat = new THREE.Quaternion($robotJoints._x, $robotJoints._y, $robotJoints._z, $robotJoints._w);
             let rotationMatrix = new THREE.Matrix4();
             rotationMatrix.makeRotationFromQuaternion(quat);
@@ -85,50 +78,6 @@
             moveInterval = null;
             stopMovementSlider(0, 0, 0, 0, 0, 0);
         }
-    }
-    // Function to compute rotation matrix from Euler angles (Z-Y-X convention)
-    function eulerToRotationMatrix(a: number, b: number, c: number): number[][] {
-        let cosA = Math.cos(a),
-            sinA = Math.sin(a);
-        let cosB = Math.cos(b),
-            sinB = Math.sin(b);
-        let cosC = Math.cos(c),
-            sinC = Math.sin(c);
-        // Rotation matrices around X, Y, Z axes
-        let Rx = [
-            [1, 0, 0],
-            [0, cosA, -sinA],
-            [0, sinA, cosA],
-        ];
-        let Ry = [
-            [cosB, 0, sinB],
-            [0, 1, 0],
-            [-sinB, 0, cosB],
-        ];
-        let Rz = [
-            [cosC, -sinC, 0],
-            [sinC, cosC, 0],
-            [0, 0, 1],
-        ];
-        // Combined rotation matrix: R = Rz * Ry * Rx
-        let Rzy = multiplyMatrices(Rz, Ry);
-        let R = multiplyMatrices(Rzy, Rx);
-        return R;
-    }
-    // Function to multiply two matrices
-    function multiplyMatrices(a: number[][], b: number[][]): number[][] {
-        let result: number[][] = [];
-        for (let i = 0; i < a.length; i++) {
-            result[i] = [];
-            for (let j = 0; j < b[0].length; j++) {
-                let sum = 0;
-                for (let k = 0; k < b.length; k++) {
-                    sum += a[i][k] * b[k][j];
-                }
-                result[i][j] = sum;
-            }
-        }
-        return result;
     }
     // Function to multiply a matrix and a vector
     function multiplyMatrixAndVector(matrix: number[][], vector: number[]): number[] {

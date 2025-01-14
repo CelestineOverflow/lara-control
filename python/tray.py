@@ -1,23 +1,22 @@
 
 from typing import List, Dict
 import numpy as np
-from space import Pose, Vector3, Quaternion
+from space import Pose, Vector3, Quaternion, Euler
 from scipy.spatial.transform import Rotation as R
 
 class Tray:
     def __init__(
         self,
         pose: Pose,
-        offsets: Vector3 = Vector3(-0.016, 0.014605, -0.1325),
+        offsets: Vector3 = Vector3(-0.016, 0.014605, 0.0),
         rows: int = 3,
         cols: int = 3,
     ):
         self.pose = pose  
-        q1 = Quaternion(0, 0, 1, 0)
         self.original_orientation = self.pose.orientation
-        self.pose.orientation = q1.invert() * self.pose.orientation
-        self.pose.orientation = Quaternion(self.pose.orientation.z, self.pose.orientation.y, self.pose.orientation.x, self.pose.orientation.w)
-
+        # rotate the quat by 30 deg in x axis
+        offset = Euler(0.0, 0.0, Euler.to_rad(24)).to_quaternion()
+        self.pose.orientation = self.pose.orientation * offset
         self.offsets = offsets
         self.rows = rows
         self.cols = cols

@@ -25,7 +25,7 @@
     let clock : THREE.Clock;
     let stream: MediaStream | null = null;
     let enabled = false;
-    let tray_cubes: THREE.Mesh[] = [];
+    
     let GeneralSceneGLB: THREE.Group | null = null;
     let arrowHelper: THREE.ArrowHelper | null = null;
     function addLights() {
@@ -51,32 +51,26 @@
         scene.add(new RectAreaLightHelper(rectLight1));
         scene.add(new RectAreaLightHelper(rectLight2));
         scene.add(new RectAreaLightHelper(rectLight3));
+        
     }
 
-    function addTrayMarkers(poses: Pose[]) {
-        // Remove the previous cubes if any
-        tray_cubes.forEach((cube) => {
-            scene.remove(cube);
-            cube.geometry.dispose();
-            if (Array.isArray(cube.material)) {
-                cube.material.forEach(material => material.dispose());
-            } else {
-                cube.material.dispose();
-            }
-        });
-        tray_cubes = [];
-        // Add new cubes
-        const geometry = new THREE.BoxGeometry(0.01, 0.01, 0.01);
-        const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        poses.forEach((pose) => {
-            const cube = new THREE.Mesh(geometry, material);
-            cube.position.copy(pose.position);
-            cube.rotation.setFromQuaternion(pose.rotation);
-            tray_cubes.push(cube);
-        });
 
-        tray_cubes.forEach((cube) => {
-            scene.add(cube);
+    const cubegeo = new THREE.BoxGeometry(0.01, 0.01, 0.01);
+    const cubemat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+
+    let cubes = [];
+    function addTrayMarkers(poses: Pose[]) {
+        // Remove existing cubes
+        cubes.forEach((cube) => scene.remove(cube));
+        cubes = [];
+        // Add new cubes
+        poses.forEach((pose) => {
+        const mesh = new THREE.Mesh(cubegeo, cubemat);
+        mesh.setRotationFromQuaternion(pose.rotation);
+        mesh.position.copy(pose.position);
+        scene.add(mesh);
+        cubes.push(mesh);
         });
     }
 

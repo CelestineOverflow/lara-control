@@ -1,6 +1,6 @@
 import json
 from scipy.spatial.transform import Rotation as R
-from typing import List
+from typing import List, Tuple
 import numpy as np
 
 
@@ -66,8 +66,6 @@ class Vector3:
             result[i] += other.data[i][j] * self.to_list()[j]
     return Vector3(*result)
    
-
-
 
 class Vector2:
    def __init__(self, x: float, y: float):
@@ -141,11 +139,10 @@ class Euler:
            
 class Quaternion:
    def __init__(self, x: float, y: float, z: float, w: float):
-       # Quaternion components
-       self.x = x  # x-component
-       self.y = y  # y-component
-       self.z = z  # z-component
-       self.w = w  # scalar component
+       self.x = x  
+       self.y = y  
+       self.z = z  
+       self.w = w 
    def to_list(self) -> List[float]:
        return [self.x, self.y, self.z, self.w]
    def __str__(self):
@@ -287,3 +284,119 @@ class PoseCartesian():
     def __init__(self, position: Vector3, orientation: Euler):
         self.position = position
         self.orientation = orientation
+
+class Matrix4:
+   """
+   4x4 homogeneous transformation matrix.
+   data is stored internally as a list of lists (4x4), consistent with Matrix3 style.
+   """
+   def __init__(self, data: List[List[float]] = None):
+       if data is None:
+           # default to identity
+           self.data = [
+               [1.0, 0.0, 0.0, 0.0],
+               [0.0, 1.0, 0.0, 0.0],
+               [0.0, 0.0, 1.0, 0.0],
+               [0.0, 0.0, 0.0, 1.0]
+           ]
+       else:
+           # Expecting a 4x4 list of lists
+           if len(data) != 4 or any(len(row) != 4 for row in data):
+               raise ValueError("Matrix4 data must be 4x4.")
+           self.data = data
+   def __str__(self):
+       return "\n".join(str(row) for row in self.data)
+   def to_list(self) -> List[List[float]]:
+       return self.data
+   @staticmethod
+   def identity() -> 'Matrix4':
+       return Matrix4()
+   @staticmethod
+   def from_quaternion_translation(q: 'Quaternion', t: 'Vector3') -> 'Matrix4':
+       """
+       Build a 4x4 homogeneous transform from a Quaternion + translation vector.
+       """
+       # 1) Convert quaternion to 3x3 rotation
+       rot_mat_3x3 = R.from_quat(q.to_list()).as_matrix()  # shape (3,3)
+       # 2) Construct the 4x4
+       data = [[0.0]*4 for _ in range(4)]
+       # fill rotation
+       for i in range(3):
+           for j in range(3):
+               data[i][j] = rot_mat_3x3[i][j]
+       # fill translation
+       data[0][3] = t.x
+       data[1][3] = t.y
+       data[2][3] = t.z
+       # last row
+       data[3][0] = 0.0
+       data[3][1] = 0.0
+       data[3][2] = 0.0
+       data[3][3] = 1.0
+       return Matrix4(data)
+   @staticmethod
+   def from_pose(pose: 'Pose') -> 'Matrix4':
+       """
+       Convenience constructor that takes your Pose (position + orientation)
+       and returns the corresponding Matrix4.
+       """
+       return Matrix4.from_quaternion_translation(pose.orientation, pose.position)
+   def to_quaternion_translation(self) -> Tuple[Quaternion, Vector3]:
+       """
+       Extract the rotation (as a Quaternion) and translation (as Vector3)
+       from this homogeneous matrix.
+       """
+       # rotation = top-left 3x3
+       rot_3x3 = np.array([row[:3] for row in self.data[:3]])  # shape (3,3)
+       # translation = top-right column
+       t = Vector3(self.data[0][3], self.data[1][3], self.data[2][3])
+       # Convert 3x3 rotation to quaternion
+       q_arr = R.from_matrix(rot_3x3).as_quat()  # [x, y, z, w]
+       q = Quaternion(q_arr[0], q_arr[1], q_arr[2], q_arr[3])
+       return (q, t)
+   def to_pose(self) -> 'Pose':
+       """
+       Convert this Matrix4 into a Pose (position + orientation).
+       """
+       q, t = self.to_quaternion_translation()
+       return Pose(t, q)
+   def inverse(self) -> 'Matrix4':
+       """
+       Invert this 4x4 homogeneous transform.
+       For a 4x4 of the form [R | t; 0 1], the inverse is [R^T | -R^T t; 0 1].
+       """
+       # We can do this manually or via numpy.linalg.inv
+       mat = np.array(self.data, dtype=np.float64)
+       inv_mat = np.linalg.inv(mat)
+       return Matrix4(inv_mat.tolist())
+   def __mul__(self, other):
+       """
+       Overload the * operator for:
+         - Matrix4 * Matrix4 -> composition of transforms
+         - Matrix4 * Vector3 -> transform a 3D point in homogeneous coords
+       """
+       if isinstance(other, Matrix4):
+           # 4x4 x 4x4
+           a = np.array(self.data, dtype=np.float64)
+           b = np.array(other.data, dtype=np.float64)
+           c = np.matmul(a, b)
+           return Matrix4(c.tolist())
+       elif isinstance(other, Vector3):
+           # 4x4 x 3D vector (assume w=1)
+           a = np.array(self.data, dtype=np.float64)
+           v = np.array([other.x, other.y, other.z, 1.0], dtype=np.float64)
+           res = a @ v
+           # result is [x', y', z', w']
+           # we usually do res[0:3] / res[3] if w' != 1.0
+           if abs(res[3]) > 1e-8:
+               return Vector3(res[0]/res[3], res[1]/res[3], res[2]/res[3])
+           else:
+               return Vector3(res[0], res[1], res[2])
+       else:
+           raise TypeError("Unsupported multiplication. Must be Matrix4 or Vector3.")
+   def transform_vector(self, v: 'Vector3') -> 'Vector3':
+       """
+       Explicit function to transform a Vector3 by this matrix in homogeneous coords.
+       Same as using the * operator if you prefer that syntax.
+       """
+       return self * v

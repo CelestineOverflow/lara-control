@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from typing import List
 from tray import Tray
-from space import Euler, Vector3, Quaternion, PoseCartesian, Pose
+from space import Euler, Vector3, Quaternion, Matrix4, Pose
 import numpy as np
 from lara import Lara
 import os
@@ -111,6 +111,7 @@ async def websocket_endpoint(websocket: WebSocket):
     while True:
         if not json_data_consumed and json_data is not None:
             json_data["is_paused"] = is_paused
+            lara.robot.unpause()
             if "force" in json_data:
                 force = float(json_data["force"])
                 if force > threshold and lara is not None:
@@ -205,33 +206,33 @@ def set_socket():
         json.dump(config, f, indent=4)
     return socket_pose
 
-# @app.post("/setTray")
-# def set_tray():
-#     global lara, tray
-#     current_pose = lara.pose
-#     tray = Tray(pose=current_pose)
-#     # Read existing config or initialize empty
-#     config_path = "config.json"
-#     if os.path.exists(config_path):
-#         with open(config_path, "r") as f:
-#             try:
-#                 config = json.load(f)
-#             except json.JSONDecodeError:
-#                 config = {}
-#     else:
-#         config = {}
-#     # Update the tray
-#     config["tray"] = tray.to_dict()
+@app.post("/setTray")
+def set_tray():
+    global lara, tray
+    current_pose = lara.pose
+    tray = Tray(pose=current_pose)
+    # Read existing config or initialize empty
+    config_path = "config.json"
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            try:
+                config = json.load(f)
+            except json.JSONDecodeError:
+                config = {}
+    else:
+        config = {}
+    # Update the tray
+    config["tray"] = tray.to_dict()
 
-#     # Write the updated config back to the file
-#     with open(config_path, "w") as f:
-#         json.dump(config, f, indent=4)        
-#     return tray.get_cell_positions()
+    # Write the updated config back to the file
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=4)        
+    return tray.get_cell_positions()
 
-# @app.get("/getTray")
-# def get_tray():
-#     global tray
-#     return tray.get_cell_positions()
+@app.get("/getTray")
+def get_tray():
+    global tray
+    return tray.get_cell_positions()
 
 
 def rotate_vector(x, y, angle):
@@ -308,36 +309,33 @@ def normalized_rotation_speed(current_yaw, target_yaw):
    normalized_speed = angle_difference / math.pi  # Divide by π for scaling
    return normalized_speed
 
-@app.post("/moveToTag")
-async def move_to_tag_jog():
+@app.post("/aling_z_axis")
+async def aling_z_axis():
     global lara, json_data, udp_server, target_camera_translation
     message = None
     speed = 1  # Initial speed in mm/s
-    # Set initial translation speed
     await lara.setTranslationSpeedMMs(speed)
     await lara.setRotSpeedDegS(100)
-    await asyncio.sleep(0.5)  # Short delay to ensure speed is set
     #0.5 x
     counter = 0
     counter2 = 0
-    rot_z = 1
+    rot_z = 0
     while True:
         counter += 1
-        # message = udp_server.receive_data()
-        # if message:
-        #     quat = Quaternion(
-        #         message['0']['quaternion']['x'],
-        #         message['0']['quaternion']['y'],
-        #         message['0']['quaternion']['z'],
-        #         message['0']['quaternion']['w']
-        #     )
-        #     rot_z = quat.to_euler().z
-        #     if rot_z < 0.1 and rot_z > -0.1:
-        #         print(f"rot_z = {rot_z}")
-        #         break
-        #     #bound it to -1 to 1
-        #     rot_z = max(min(rot_z, 1), -1)
-  
+        message = udp_server.receive_data()
+        if message:
+            quat = Quaternion(
+                message['0']['quaternion']['x'],
+                message['0']['quaternion']['y'],
+                message['0']['quaternion']['z'],
+                message['0']['quaternion']['w']
+            )
+            rot_z = quat.to_euler().z
+            if rot_z < 0.1 and rot_z > -0.1:
+                print(f"rot_z = {rot_z}")
+                break
+            #bound it either 1 or -1 depending on the sign
+            rot_z = 1 if rot_z > 0 else -1
         await lara.start_movement_slider(0, 0, 0, 0, 0, -rot_z)
         await asyncio.sleep(0.05)
         if counter > 100:
@@ -348,6 +346,99 @@ async def move_to_tag_jog():
         if counter2 > 10000:
             break
     await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
+
+
+@app.post("/Aling_XY")
+async def aling_xy():
+    global lara, json_data, udp_server, target_camera_translation
+    message = None
+    speed = 1
+    error = 0.1 / 1000  # 0.1mm
+    await lara.setTranslationSpeedMMs(speed)
+    await lara.setRotSpeedDegS(100)
+    while True:
+        message = udp_server.receive_data()
+        if message:
+            position = Vector3(message["0"]["x"], message["0"]["y"], message["0"]["z"])
+            if position.x < error and position.x > -error and position.y < error and position.y > -error:
+                break
+            # Move the robot towards the target position
+            await lara.start_movement_slider(0, 0, 0, 0, 0, 0)
+            await asyncio.sleep(0.05)
+    await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
+    return {"position": lara.pose.position.to_dict()}
+
+
+@app.post("/align")
+async def align():
+   global lara, udp_server
+   # We might define these for clarity, but it's up to you how you store them
+   # speed in mm/s, error threshold in mm, etc.
+   speed_mm_s = 1
+   rotation_speed_deg_s = 100
+   positional_tolerance = 0.1  # mm
+   await lara.setTranslationSpeedMMs(speed_mm_s)
+   await lara.setRotSpeedDegS(rotation_speed_deg_s)
+   while True:
+        message = udp_server.receive_data()
+        if not message:
+            continue
+        # 1) Build the detected pose (tag in camera frame) from the data
+        #    “message["0"]” is presumably your dictionary with pose info
+        position = Vector3(
+            message["0"]["x"],
+            message["0"]["y"],
+            message["0"]["z"]
+        )
+        quaternion = Quaternion(
+            message["0"]["quaternion"]["x"],
+            message["0"]["quaternion"]["y"],
+            message["0"]["quaternion"]["z"],
+            message["0"]["quaternion"]["w"]
+        )
+        detected_pose = Pose(position, quaternion)
+        # 2) Camera offset pose (placeholder is identity)
+        #    In real usage, fill with the actual offset from robot end-effector to camera
+        offset_camera_pose = Pose(
+            position=Vector3(0, 0, 0),
+            orientation=Quaternion(0, 0, 0, 1)
+        )
+        # 3) Current robot pose in the world (already known from your "lara.pose"?)
+        lara_global_pose = lara.pose  # Pose of robot end-effector in world
+        # ---- Convert to 4x4 transforms ----
+        T_robot_world   = Matrix4.from_pose(lara_global_pose)    # Robot in world
+        T_camera_robot  = Matrix4.from_pose(offset_camera_pose)   # Camera in robot
+        T_tag_camera    = Matrix4.from_pose(detected_pose)        # Tag in camera
+        # 4) Compute T_tag_world = T_robot_world * T_camera_robot * T_tag_camera
+        T_tag_world = T_robot_world * T_camera_robot * T_tag_camera
+        # 5) For a simple “align” scenario, let’s say we want the end-effector exactly where the tag is
+        #    (i.e., no approach offset). So the desired end-effector in world = T_tag_world
+        T_robot_world_desired = T_tag_world
+        # 6) Compute the delta transform from the robot’s current pose to the desired
+        T_delta = T_robot_world.inverse() * T_robot_world_desired
+        # 7) Extract the translation + rotation from T_delta
+        delta_q, delta_t = T_delta.to_quaternion_translation()
+        delta_euler = delta_q.to_euler(order='xyz')  # returns Euler(x, y, z) in radians
+        # Convert radians to degrees 
+        delta_rx_deg = np.degrees(delta_euler.x)
+        delta_ry_deg = np.degrees(delta_euler.y)
+        delta_rz_deg = np.degrees(delta_euler.z)
+        # 8) check if we’re within some positional tolerance
+        dist_mm = delta_t.magnitude() * 1000.0
+        if dist_mm < positional_tolerance:
+            print("Tag is close enough, stopping alignment loop.")
+            break
+        p = {
+            "x": delta_t.x * 1000,
+            "y": delta_t.y * 1000,
+            "z": delta_t.z * 1000,
+            "rx": delta_rx_deg,
+            "ry": delta_ry_deg,
+            "rz": delta_rz_deg
+        }
+        print(f"Moving to {p}")
+        break
+
 @app.post("/moveToCell")
 def move_to_cell(row: int = 0, col: int = 0):
     global lara, socket_pose, json_data
@@ -362,50 +453,55 @@ def move_to_socket():
 @app.post("/moveUntilPressure")
 async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300.0):
     global lara, json_data, threshold, force, is_paused
-    print(f"Entering move_until_pressure with pressure={pressure}, wiggle_room={wiggle_room}")
+    start_position = lara.pose.position # Store the start position
     await lara.setTranslationSpeedMMs(0.5)
-    print("Set translation speed to 0.5 mm/s")
-    move_z = -1
+    move_z = -1 # Direction to move in
+    MAX_DEPTH = 0.010 # 10mm or 0.01m
+    # Move the robot down until the force exceeds the threshold or the maximum depth is reached
+    print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
     for i in range(1000):
-        print(f"Loop iteration {i+1}/1000")
+        print(f"height: {lara.pose.position.z * 1000} mm")
+        if lara.pose.position.z - start_position.z < -MAX_DEPTH:
+            break
+        # check if the force exceeds the threshold
+        if force > pressure + wiggle_room:
+            break
         if json_data is not None:
-            json_data["is_paused"] = is_paused
-            print("Updated json_data['is_paused']")
             if "force" in json_data:
                 force = float(json_data["force"])
                 print(f"Current force: {force}")
                 if force > pressure + wiggle_room:
                     print(f"Force {force} exceeds pressure {pressure} + wiggle_room {wiggle_room}. Breaking loop.")
                     break
-        if i == 999:
-            print("Force not exceeded after 1000 iterations")
         await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
-        print(f"Started movement with move_z={move_z}")
         await asyncio.sleep(0.01)
-    counter = 10
-    for i in range(1000):
-        print(f"Second loop iteration {i+1}/100")
-        if json_data is not None:
-            if "force" in json_data:
-                force = float(json_data["force"])
-                print(f"Current force: {force}")
-                if force > pressure + wiggle_room:
-                    move_z = 0.3
-                    counter = 10
-                    print(f"Force {force} > pressure + wiggle_room. Setting move_z to {move_z} and resetting counter.")
-                    await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
-                elif force < pressure - wiggle_room:
-                    move_z = -0.3
-                    counter = 10
-                    print(f"Force {force} < pressure - wiggle_room. Setting move_z to {move_z} and resetting counter.")
-                    await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
-                else:
-                    counter -= 1
-                    print(f"Force within wiggle room. Decrementing counter to {counter}")
-                    if counter == 0:
-                        print("Counter reached zero. Exiting loop.")
-                        break
-            await asyncio.sleep(0.01)
+        if i == 999:
+            await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
+            return {"error": "Force did not exceed threshold within 1000 iterations."}
+    # counter = 10
+    # for i in range(1000):
+    #     print(f"Second loop iteration {i+1}/100")
+    #     if json_data is not None:
+    #         if "force" in json_data:
+    #             force = float(json_data["force"])
+    #             print(f"Current force: {force}")
+    #             if force > pressure + wiggle_room:
+    #                 move_z = 0.3
+    #                 counter = 10
+    #                 print(f"Force {force} > pressure + wiggle_room. Setting move_z to {move_z} and resetting counter.")
+    #                 await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
+    #             elif force < pressure - wiggle_room:
+    #                 move_z = -0.3
+    #                 counter = 10
+    #                 print(f"Force {force} < pressure - wiggle_room. Setting move_z to {move_z} and resetting counter.")
+    #                 await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
+    #             else:
+    #                 counter -= 1
+    #                 print(f"Force within wiggle room. Decrementing counter to {counter}")
+    #                 if counter == 0:
+    #                     print("Counter reached zero. Exiting loop.")
+    #                     break
+    #         await asyncio.sleep(0.01)
     await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
     print("Stopped all movements.")
 @app.post("/EmergencyStop")

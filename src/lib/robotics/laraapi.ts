@@ -220,12 +220,14 @@ export async function setTray() {
         });
         console.log("Set tray response:", response);
         const data = await response.json();
+        trayPoses.set([]);
         data.forEach((element: any) => {
             const pose = new Pose(
                 new Vector3(element.position.x, element.position.z, -element.position.y),
                 new Quaternion(element.orientation.x, element.orientation.z, -element.orientation.y, element.orientation.w)
               );
-            trayPoses.update((poses) => {
+            
+              trayPoses.update((poses) => {
                 poses.push(pose);
                 return poses;
             });
@@ -247,6 +249,7 @@ export async function getTray() {
         });
         console.log("Get tray response:", response);
         const data = await response.json();
+        trayPoses.set([]);
         data.forEach((element: any) => {
             const pose = new Pose(
                 new Vector3(element.position.x, element.position.z, -element.position.y),

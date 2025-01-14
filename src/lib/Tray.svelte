@@ -57,20 +57,23 @@
 		const data = await response.json();
 		console.log(data);
     }
-	//
 // 	curl -X 'POST' \
-//   'http://localhost:1442/TurnJogOff' \
+//   'http://localhost:1442/moveUntilPressure?pressure=1000&wiggle_room=300' \
 //   -H 'accept: application/json' \
 //   -d ''
+// Request
 
-	async function turnJogOff() {
-		const response = await fetch("http://localhost:1442/TurnJogOff", {
+    async function press() {
+		const response = await fetch("http://localhost:1442/moveUntilPressure?pressure=1000&wiggle_room=300", {
 			method: "POST",
 			headers: {
 				"accept": "application/json",
 			},
 		});
+		const data = await response.json();
+		console.log(data);
 	}
+
 
 
     function generateWaypoints(event: MouseEvent & { currentTarget: EventTarget & HTMLButtonElement; }) {
@@ -99,11 +102,11 @@
 </button>
 
 <button
-	on:click={() => (turnJogOff())}
+	on:click={() => (press())}
 	class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
 >
 
-	Turn Jog Off
+	Press
 </button>
 <!-- Modal Component -->
 <Modal bind:showModal>

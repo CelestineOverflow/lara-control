@@ -149,6 +149,7 @@ class Lara:
 		}
 		await self.sio.emit('CartesianSlider', data)
 	def move_to_pose(self, pose: Pose):
+		print(f"Moving to pose: {pose}")
         # First step: use the current pose
 		steps = []
 		steps.append(PoseCartesian(position=self.pose.position, orientation=self.pose.orientation.to_euler(order="xyz")))
@@ -187,9 +188,10 @@ class Lara:
 		#fourth step is the target position
 		steps.append(PoseCartesian(position=pose.position, orientation=pose.orientation.to_euler(order="xyz")))
 		#move
+		print(f"Moving to {steps}")
 		self.robot.set_mode("Automatic")
 		linear_property = {
-			"speed": 0.1,
+			"speed": 0.03,
 			"acceleration": 0.01,
 			"blend_radius": 0.005,
 			"target_pose": [
@@ -207,9 +209,13 @@ class Lara:
 			"elevation": 0.0,
 			"azimuth": 0.0
 		}
+		self.robot.unpause()
 		self.robot.move_linear(**linear_property)
+		print("Movement done")
 		self.robot.stop()
+		print("Stopped")
 		self.robot.set_mode("Teach")
+		print("Teach mode set")
 		return self.robot.robot_status("jointAngles")
 	
 	async def move(self, v: Vector3, r: Vector3 = Vector3(0, 0, 0), along_normal: bool = False):

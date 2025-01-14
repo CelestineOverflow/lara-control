@@ -167,11 +167,11 @@ def square_superimpose(frame):
 
 # -------------------- Camera Presets --------------------
 camera_presets = {
-    1: {
+    2: {
         'rotate': False,
         'calibration_path': 'computer_vision/calibration_data.json',
     },
-    2: {
+    1: {
         'rotate': True,
         'calibration_path': 'computer_vision/calibration_data_close_up.json',
     }
