@@ -348,84 +348,78 @@ async def aling_z_axis():
     await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
 
 
-@app.post("/Aling_XY")
-async def aling_xy():
-    global lara, json_data, udp_server, target_camera_translation
-    message = None
-    speed = 1
-    error = 0.1 / 1000  # 0.1mm
+@app.post("/computePose")
+async def compute():
+    global lara, udp_server
+    speed = 1  # Initial speed in mm/s
     await lara.setTranslationSpeedMMs(speed)
     await lara.setRotSpeedDegS(100)
+    current_movement_vector = Vector3(0, 0, 0)
+    current_rotation_vector = Vector3(0, 0, 0)
     while True:
         message = udp_server.receive_data()
         if message:
-            position = Vector3(message["0"]["x"], message["0"]["y"], message["0"]["z"])
-            if position.x < error and position.x > -error and position.y < error and position.y > -error:
+            # 1) Build the detected pose (tag in camera frame) from the data
+            position = Vector3(
+                message["0"]["x"],
+                message["0"]["y"],
+                message["0"]["z"]
+            )
+            quaternion = Quaternion(
+                message["0"]["quaternion"]["x"],
+                message["0"]["quaternion"]["y"],
+                message["0"]["quaternion"]["z"],
+                message["0"]["quaternion"]["w"]
+            )
+            detected_pose = Pose(position, quaternion)
+            # 2) Camera offset pose
+            offset_camera_pose = Pose(
+                position=Vector3(0, 0, 0),
+                orientation=Quaternion(0, 0, 0, 1)
+            )
+            # 3) Current robot pose in the world
+            lara_global_pose = lara.pose
+            # ---- Convert to 4x4 transforms ----
+            T_robot_world   = Matrix4.from_pose(lara_global_pose)    # Robot in world
+            T_camera_robot  = Matrix4.from_pose(offset_camera_pose)   # Camera in robot
+            T_tag_camera    = Matrix4.from_pose(detected_pose)        # Tag in camera
+            # 4) Compute T_tag_world
+            T_tag_world = T_robot_world * T_camera_robot * T_tag_camera
+            # 5) For a simple “align” scenario, let’s say we want the end-effector exactly where the tag is
+            T_robot_world_desired = T_tag_world
+            # 6) Compute the delta transform from the robot’s current pose to the desired
+            T_delta = T_robot_world.inverse() * T_robot_world_desired
+            # 7) Extract the translation + rotation from T_delta
+            delta_q, delta_t = T_delta.to_quaternion_translation()
+            # Custom offset 
+            Offset = Euler(0.0, 0.0, Euler.to_rad(-24)).to_quaternion()
+            delta_t = delta_t.rotate(Offset)
+            # 8) Move the robot to the desired position using the delta translation
+            # rotation
+            rot_z = delta_q.to_euler().z
+            if not (rot_z < 0.1 and rot_z > -0.1):
+                await lara.start_movement_slider(0, 0, 0, 0, 0, -1 if rot_z > 0 else 1)
+                continue # Skip the translation if the rotation is not aligned
+            # translation
+            if delta_t.x < -0.001:
+                current_movement_vector.x = 1.0
+            elif delta_t.x > 0.001:
+                current_movement_vector.x = -1.0
+            else:
+                current_movement_vector.x = 0
+            
+            if delta_t.y < -0.001:
+                current_movement_vector.y = 1.0
+            elif delta_t.y > 0.001:
+                current_movement_vector.y = -1.0
+            else:
+                current_movement_vector.y = 0
+            if abs(delta_t.x) < 0.001 and abs(delta_t.y) < 0.001:
+                print("Reached target position")
                 break
-            # Move the robot towards the target position
-            await lara.start_movement_slider(0, 0, 0, 0, 0, 0)
-            await asyncio.sleep(0.05)
+            await lara.start_movement_slider(current_movement_vector.x, current_movement_vector.y, 0, 0, 0, 0)
+        await asyncio.sleep(0.1)
     await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
-    return {"position": lara.pose.position.to_dict()}
-
-
-@app.post("/computePose")
-async def compute():
-   global lara, udp_server
-   while True:
-        message = udp_server.receive_data()
-        if not message:
-            continue
-        # 1) Build the detected pose (tag in camera frame) from the data
-        position = Vector3(
-            message["0"]["x"],
-            message["0"]["y"],
-            message["0"]["z"]
-        )
-        quaternion = Quaternion(
-            message["0"]["quaternion"]["x"],
-            message["0"]["quaternion"]["y"],
-            message["0"]["quaternion"]["z"],
-            message["0"]["quaternion"]["w"]
-        )
-        detected_pose = Pose(position, quaternion)
-        # 2) Camera offset pose
-        offset_camera_pose = Pose(
-            position=Vector3(0, 0, 0),
-            orientation=Quaternion(0, 0, 0, 1)
-        )
-        # 3) Current robot pose in the world
-        lara_global_pose = lara.pose
-        # ---- Convert to 4x4 transforms ----
-        T_robot_world   = Matrix4.from_pose(lara_global_pose)    # Robot in world
-        T_camera_robot  = Matrix4.from_pose(offset_camera_pose)   # Camera in robot
-        T_tag_camera    = Matrix4.from_pose(detected_pose)        # Tag in camera
-        # 4) Compute T_tag_world
-        T_tag_world = T_robot_world * T_camera_robot * T_tag_camera
-        # 5) For a simple “align” scenario, let’s say we want the end-effector exactly where the tag is
-        T_robot_world_desired = T_tag_world
-        # 6) Compute the delta transform from the robot’s current pose to the desired
-        T_delta = T_robot_world.inverse() * T_robot_world_desired
-        # 7) Extract the translation + rotation from T_delta
-        delta_q, delta_t = T_delta.to_quaternion_translation()
-        # Custom offset 
-        Offset = Euler(0.0, 0.0, Euler.to_rad(-24)).to_quaternion()
-        delta_t = delta_t.rotate(Offset)
-        delta_euler = delta_q.to_euler(order='xyz')
-        # Convert radians to degrees 
-        delta_rx_deg = np.degrees(delta_euler.x)
-        delta_ry_deg = np.degrees(delta_euler.y)
-        delta_rz_deg = np.degrees(delta_euler.z)
-        p = {
-            "x": delta_t.x * 1000,
-            "y": delta_t.y * 1000,
-            "z": delta_t.z * 1000,
-            "rx": delta_rx_deg,
-            "ry": delta_ry_deg,
-            "rz": delta_rz_deg
-        }
-        return p
-
 @app.post("/moveToCell")
 def move_to_cell(row: int = 0, col: int = 0):
     global lara, socket_pose, json_data
