@@ -15,13 +15,12 @@ let socket: any;
 export function setupSocket() {
     socket = socketIOClient("http://192.168.2.13:8081");
 
-    socket.on("connect", () => {
+    socket.on("connect", async () => {
         console.log(`Connected with socket ID: ${socket.id}`);
-        isConnected = true
-        setInterval(() => {
-            socket.emit("heartbeat_response", true);
-        }, 5000);
+        isConnected = true;
         console.log("Connected and emitted events.");
+        await fetch_cartesian_pose();
+        await fetch_joints_angle();
     });
 
     socket.on("heartbeat_check", () => {
@@ -330,4 +329,45 @@ export async function setPause(): Promise<void> {
     }).then((response) => {
         console.log(response);
     });
+}
+
+export async function fetch_cartesian_pose(): Promise<void> {
+    try {
+        const response = await fetch("http://192.168.2.13:8081/api/cartesianpose");
+        const data = await response.json();
+        const pose = new Pose(
+            new Vector3(data[0].X, data[0].Z, -data[0].Y),
+            new Quaternion(data[0]._X, data[0]._Z, -data[0]._Y, data[0]._W)
+        );
+        robotJoints.update((joints) => {
+            joints.x = data[0].X;
+            joints.y = data[0].Y;
+            joints.z = data[0].Z;
+            joints._x = data[0]._X;
+            joints._y = data[0]._Y;
+            joints._z = data[0]._Z;
+            joints._w = data[0]._W;
+            return joints;
+        });
+    } catch (error) {
+        console.error("Error:", error);
+    }
+}
+
+export async function fetch_joints_angle(): Promise<void> {
+    try {
+        const response = await fetch("http://192.168.2.13:8081/api/jointangles");
+        const data = await response.json();
+        robotJoints.update((joints) => {
+            joints.joint1 = data[0].A1;
+            joints.joint2 = data[0].A2;
+            joints.joint3 = data[0].A3;
+            joints.joint4 = data[0].A4;
+            joints.joint5 = data[0].A5;
+            joints.joint6 = data[0].A6;
+            return joints;
+        });
+    } catch (error) {
+        console.error("Error:", error);
+    }
 }

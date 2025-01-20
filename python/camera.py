@@ -28,7 +28,8 @@ states = ["normal", "square_detector", "tag_detector"]
 state = states[2]
 current_camera_index = 0
 change_camera_flag = False
-
+original_capture_resoltion = (3840, 2160)
+capture_resolution = (1920, 1080)
 # --------------------- API ---------------------
 app = FastAPI()
 
@@ -258,6 +259,12 @@ def load_calibration_file(calibration_file_path):
         mtx_arr = np.array(reconstruction['mtx'])
         dist_arr = np.array(reconstruction['dist'])
         fx, fy, cx, cy = mtx_arr[0, 0], mtx_arr[1, 1], mtx_arr[0, 2], mtx_arr[1, 2]
+        # adjust for the capture resolution from original
+        fx *= capture_resolution[0] / original_capture_resoltion[0]
+        fy *= capture_resolution[1] / original_capture_resoltion[1]
+        cx *= capture_resolution[0] / original_capture_resoltion[0]
+        cy *= capture_resolution[1] / original_capture_resoltion[1]
+
         mtx = [fx, fy, cx, cy]
         dist = dist_arr
 
@@ -287,6 +294,39 @@ def apply_camera_offsets(cam_index, raw_x, raw_y, raw_z):
     corrected_x = raw_x + offset_x
     corrected_y = raw_y + offset_y
     return corrected_x, corrected_y
+
+
+def add_vertical_gradient(image, top_value=1.3, bottom_value=1.0):
+    """
+    Applies a vertical brightness gradient to the image.
+    The top of the image is multiplied by `top_value`,
+    and it transitions linearly to `bottom_value` at the bottom.
+    Parameters:
+        image: BGR image (as read by cv2)
+        top_value (float): brightness multiplier at the top
+        bottom_value (float): brightness multiplier at the bottom
+    Returns:
+        gradient_image: Image with a vertical brightness gradient
+    """
+    # Convert the image to float [0,1] for safe multiplication
+    float_img = image.astype(np.float32) / 255.0
+    height, width = image.shape[:2]
+    # Create a 1D array that goes from top_value to bottom_value
+    # shape: (height,)
+    vertical_profile = np.linspace(top_value, bottom_value, height, dtype=np.float32)
+    # Reshape to (height, 1) then tile across width -> (height, width)
+    vertical_mask = np.tile(vertical_profile.reshape(-1, 1), (1, width))
+    # If the image has 3 channels, we need to expand the mask
+    # shape -> (height, width, 3)
+    if len(float_img.shape) == 3 and float_img.shape[2] == 3:
+        vertical_mask = cv2.merge([vertical_mask, vertical_mask, vertical_mask])
+    # Multiply the image by the mask
+    gradient_img = float_img * vertical_mask
+    # Clip to [0, 1], convert back to uint8
+    gradient_img = np.clip(gradient_img, 0, 1)
+    gradient_img = (gradient_img * 255).astype(np.uint8)
+    return gradient_img
+
 
 def detector_superimpose(img, detector, tag_size=0.014, current_camera_index=0):
     global last_tag_data
@@ -339,7 +379,7 @@ def detector_superimpose(img, detector, tag_size=0.014, current_camera_index=0):
 
         raw_y = -tvec[0][0]
         raw_x = -tvec[1][0]
-        raw_z = tvec[2][0]
+        raw_z = tvec[2][0] - 0.020 # offset for the camera
 
         detectionsVectors[d.tag_id] = {
             "x": raw_x,
@@ -501,7 +541,7 @@ def calibration_routine(cap, rotate_flag, current_camera_index):
             2
         )
 
-        cv2.imshow("Calibration", displayed_frame)
+        # cv2.imshow("Calibration", displayed_frame)
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord('x'):
@@ -615,8 +655,8 @@ def camera_loop():
         print(f"Could not open camera {initial_camera} after retries. Exiting camera loop.")
         return
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture_resolution[0])
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_resolution[1])
     cap.set(cv2.CAP_PROP_FPS, 30)
 
     udp_thread = threading.Thread(target=udp_server, daemon=True)
@@ -638,8 +678,8 @@ def camera_loop():
                 if cap is None:
                     print("Could not re-open camera after retries. Exiting camera loop.")
                     break
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture_resolution[0])
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_resolution[1])
                 cap.set(cv2.CAP_PROP_FPS, 30)
                 continue
 
@@ -654,7 +694,7 @@ def camera_loop():
                 send_udp_data(detections)
 
             resized = cv2.resize(frame, (1280, 720))
-            cv2.imshow(stream.name, resized)
+            # cv2.imshow(stream.name, resized)
             if change_camera_flag:
                 cap.release()
                 new_camera = camera_indices[current_camera_index]
@@ -663,8 +703,8 @@ def camera_loop():
                 if cap is None:
                     print(f"Failed to open camera {new_camera} after retries. Exiting loop.")
                     break
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture_resolution[0])
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_resolution[1])
                 cap.set(cv2.CAP_PROP_FPS, 30)
                 print(f"Switched to camera {new_camera}")
             

@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     lara = Lara()
     await lara.connect_socket()
     print("Connected to the robot")
-
+    lara.robot.turn_off_jog()
     # # Start the reader thread
     stop_event.clear()
     reader_thread = threading.Thread(target=reader, daemon=True)
@@ -96,13 +96,14 @@ def read_root():
     return RedirectResponse(url="/docs")
 
 is_paused = False
-threshold = 3000.0
+threshold = 10000.0
 force = 0.0
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json
+    unblock_collided_counter = 0
     await websocket.accept()
     #send the first data json to the client
     if first_data_json:
@@ -117,10 +118,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 if force > threshold and lara is not None:
                     lara.robot.pause()
                     is_paused = True
+                    unblock_collided_counter = 0
+                else:
+                    if lara.collided:
+                        print(f"collided unblock counter {unblock_collided_counter}")
+                        unblock_collided_counter += 1
+                        if unblock_collided_counter > 10:
+                            await lara.reset_collision()
+                            unblock_collided_counter = 0
+                            print("Unblocked collided")
             await websocket.send_json(json_data)
             await asyncio.sleep(0.01)
             json_data_consumed = True
-
 @app.post("/setPause")
 def set_pause(pause: bool):
     print("Setting pause to", pause)
@@ -349,13 +358,28 @@ async def aling_z_axis():
 
 
 @app.post("/AlignToTag")
-async def align_to_tag(offsetx: float = 0, offsety: float = 0, offsetz: float = 0):
+async def align_to_tag(offsetx: float = 0, offsety: float = 0):
+    print("Aligning to tag")
     global lara, udp_server
+    current_speed = 20
+    await lara.setTranslationSpeedMMs(current_speed)
+    await lara.setRotSpeedDegS(50)
+    await asyncio.sleep(0.1)
+    #convert the offset to meters with a max value of 10mm in each direction
+    if offsetx > 10 or offsetx < -10 or offsety > 10 or offsety < -10:
+        return {"error": "Offset values must be between -10 and 10 mm"}
+    offsetx /= 1000
+    offsety /= 1000
+    z_final_height = (5 / 1000)
+    counter_no_message = 0
+    disable_out_of_message_movement = False
     current_movement_vector = Vector3(0, 0, 0)
     current_rotation_vector = Vector3(0, 0, 0)
+    print("Starting alignment")
     while True:
         message = udp_server.receive_data()
         if message:
+            print("Message received")
             # 1) Build the detected pose (tag in camera frame) from the data
             position = Vector3(
                 message["0"]["x"],
@@ -371,36 +395,72 @@ async def align_to_tag(offsetx: float = 0, offsety: float = 0, offsetz: float = 
             detected_pose = Pose(position, quaternion)
             # 2) Camera offset pose
             offset_camera_pose = Pose(
-                position=Vector3(0, 0, 0),
+                position=Vector3(0.0, 0.0, 0.0),
                 orientation=Quaternion(0, 0, 0, 1)
             )
-            # 3) Current robot pose in the world
+            # 3) Custom offset pose
+            custom_offset = Pose(
+                position=Vector3(-offsetx, -offsety, 0),
+                orientation=Quaternion(0, 0, 0, 1)
+            )
+            # 4) Current robot pose in the world
             lara_global_pose = lara.pose
             # ---- Convert to 4x4 transforms ----
             T_robot_world   = Matrix4.from_pose(lara_global_pose)    # Robot in world
             T_camera_robot  = Matrix4.from_pose(offset_camera_pose)   # Camera in robot
             T_tag_camera    = Matrix4.from_pose(detected_pose)        # Tag in camera
-            # 4) Compute T_tag_world
-            T_tag_world = T_robot_world * T_camera_robot * T_tag_camera
-            # 5) For a simple “align” scenario, let’s say we want the end-effector exactly where the tag is
+            T_custom_offset = Matrix4.from_pose(custom_offset)        # Custom offset
+            # 5) Compute T_tag_world
+            T_tag_world = T_robot_world * T_camera_robot * T_tag_camera * T_custom_offset
+            # 6) For a simple “align” scenario, let’s say we want the end-effector exactly where the tag is
             T_robot_world_desired = T_tag_world
-            # 6) Compute the delta transform from the robot’s current pose to the desired
+            # 7) Compute the delta transform from the robot’s current pose to the desired
             T_delta = T_robot_world.inverse() * T_robot_world_desired
-            # 7) Extract the translation + rotation from T_delta
+            # 8) Extract the translation + rotation from T_delta
             delta_q, delta_t = T_delta.to_quaternion_translation()
             # Custom offset 
             Offset = Euler(0.0, 0.0, Euler.to_rad(-24)).to_quaternion()
             delta_t = delta_t.rotate(Offset)
-            # 8) Move the robot to the desired position using the delta translation
+            # 9) Move the robot to the desired position using the delta translation
+            #speed settings
+            if abs(delta_t.z) > ((150 / 1000) + z_final_height) and current_speed != 50:
+                current_speed = 50
+                await lara.setTranslationSpeedMMs(current_speed)
+            if abs(delta_t.z) > ((100 / 1000) + z_final_height) and abs(delta_t.z) < ((150 / 1000) + z_final_height) and current_speed != 30:
+                current_speed = 30
+                await lara.setTranslationSpeedMMs(current_speed)
+            if abs(delta_t.z) > ((70 / 1000) + z_final_height) and abs(delta_t.z) < ((100 / 1000) + z_final_height) and current_speed != 20:
+                current_speed = 20
+                await lara.setTranslationSpeedMMs(current_speed)
+            elif abs(delta_t.z) > ((50 / 1000) + z_final_height) and abs(delta_t.z) < ((70 / 1000) + z_final_height) and current_speed != 5:
+                current_speed = 10
+                await lara.setTranslationSpeedMMs(current_speed)
+            elif abs(delta_t.z) > ((30 / 1000) + z_final_height) and abs(delta_t.z) < ((50 / 1000) + z_final_height) and current_speed != 5:
+                current_speed = 5
+                await lara.setTranslationSpeedMMs(current_speed)
+            elif abs(delta_t.z) > ((5 / 1000) + z_final_height) and abs(delta_t.z) < ((30 / 1000) + z_final_height) and current_speed != 1:
+                current_speed = 1
+                await lara.setTranslationSpeedMMs(current_speed)
             # rotation
             rot_z = delta_q.to_euler().z
-            if not (rot_z < 0.01 and rot_z > -0.01):
-                await lara.start_movement_slider(0, 0, 0, 0, 0, -1 if rot_z > 0 else 1)
+            allowed_error_rot = 0.5
+            if abs(delta_t.z) > ((50 / 1000) + z_final_height):
+                allowed_error_rot = 0.2
+            elif abs(delta_t.z) > ((30 / 1000) + z_final_height):
+                allowed_error_rot = 0.1
+            else:
+                allowed_error_rot = 0.01     
+            if not (rot_z < allowed_error_rot and rot_z > -allowed_error_rot):
+                current_movement_vector.x = 0
+                current_movement_vector.y = 0
+                current_movement_vector.z = 0
+                current_rotation_vector.z = -1 if rot_z > 0 else 1
+                await lara.start_movement_slider(0, 0, 0, 0, 0, current_rotation_vector.z)
                 continue # Skip the translation if the rotation is not aligned
             # translation
             fine_tune_speed = 0.1
             normal_speed = 1.0
-            Kp = 100.0
+            Kp = 25.0
 
             # X movement
             err_x = delta_t.x
@@ -425,11 +485,38 @@ async def align_to_tag(offsetx: float = 0, offsety: float = 0, offsetz: float = 
                 elif abs(proportional_speed_y) > normal_speed:
                     proportional_speed_y = normal_speed if proportional_speed_y > 0 else -normal_speed
                 current_movement_vector.y = proportional_speed_y
-            if abs(delta_t.x) < (0.05 / 1000) and abs(delta_t.y) < (0.05 / 1000):
-                print("Reached target position")
-                break
-            await lara.start_movement_slider(current_movement_vector.x, current_movement_vector.y, 0, 0, 0, 0)
-        await asyncio.sleep(0.1)
+
+            # Z movement
+        
+            if abs(delta_t.z) > ((50 / 1000) + z_final_height):
+                allowed_error_xy = 10 / 1000
+            elif abs(delta_t.z) > ((30 / 1000) + z_final_height):
+                allowed_error_xy = 3 / 1000
+            elif abs(delta_t.z) > ((5 / 1000) + z_final_height):
+                allowed_error_xy = 1 / 1000
+            else: 
+                allowed_error_xy = 0.1 / 1000           
+            if not (abs(delta_t.x) < allowed_error_xy and abs(delta_t.y) < allowed_error_xy):
+                await lara.start_movement_slider(current_movement_vector.x, current_movement_vector.y, 0, 0, 0, 0)
+                if allowed_error_xy == 0.1 / 1000:
+                    disable_out_of_message_movement = True
+                    await lara.start_movement_slider(0, 0, 0, 0, 0, 0)
+                print(f"c v x: {current_movement_vector.x}, c v y: {current_movement_vector.y}")
+                continue
+            else:
+                print("delta_t.x: ", delta_t.x)
+                if abs(delta_t.z) < z_final_height:
+                    print("Reached the desired position")
+                    break
+                else:
+                    current_movement_vector.z = -1
+                    await lara.start_movement_slider(0, 0, current_movement_vector.z, 0, 0, 0)
+                    # lara.robot.turn_on_jog(0, 0, current_movement_vector.z, 0, 0, 0)
+        else:
+            counter_no_message += 1
+            if counter_no_message < 100 and not disable_out_of_message_movement:
+                await lara.start_movement_slider(current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z)
+        await asyncio.sleep(0.001)
     await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
 @app.post("/moveToCell")
 def move_to_cell(row: int = 0, col: int = 0):
@@ -437,10 +524,34 @@ def move_to_cell(row: int = 0, col: int = 0):
     lara.move_to_pose(tray.get_cell_robot_orientation(row, col))
 
 @app.post("/moveToSocket")
-def move_to_socket():
+async def move_to_socket():
     global lara, socket_pose, json_data
-    lara.move_to_pose(socket_pose)
+    lara.move_to_pose_tag(socket_pose)
+    await align_to_tag(4.5,0)
+    #set new socket pose
+    await set_socket()
 
+
+@app.post("/mock_up_move")
+async def mock_up_move():
+    await lara.start_movement_slider(0, 0, 0, 0, 0, 0)
+
+@app.post("/testMove")
+async def test_move():
+    import requests
+    payload = {
+        "X": -0.201,
+        "Y": -0.504,
+        "Z": 0.09,
+        "A": -3.141593,
+        "B": 0,
+        "C": 0,
+        "_id": "661a8226651be61e742d8af6",
+        "__v": 0 
+    }
+    #{ "X": -0.201, "Y": -0.504, "Z": 0.09, "A": -3.141593, "B": 0, "C": 0, "_id": "661a8226651be61e742d8af6", "__v": 0 }
+    response = requests.patch("http://192.168.2.13:8081/api/mancart", json=payload)
+    return response.json()
 
 @app.post("/moveUntilPressure")
 async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300.0):
@@ -450,7 +561,12 @@ async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300
     move_z = -1 # Direction to move in
     MAX_DEPTH = 0.010 # 10mm or 0.01m
     # Move the robot down until the force exceeds the threshold or the maximum depth is reached
+    await asyncio.sleep(1)
     print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
+    lara.robot.turn_on_jog(
+        jog_velocity=[0, 0, move_z, 0, 0, 0], 
+        jog_type='Cartesian'
+    )
     for i in range(1000):
         print(f"height: {lara.pose.position.z * 1000} mm")
         if lara.pose.position.z - start_position.z < -MAX_DEPTH:
@@ -465,36 +581,12 @@ async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300
                 if force > pressure + wiggle_room:
                     print(f"Force {force} exceeds pressure {pressure} + wiggle_room {wiggle_room}. Breaking loop.")
                     break
-        await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
+        lara.robot.jog(set_jogging_external_flag = 1)
         await asyncio.sleep(0.01)
         if i == 999:
-            await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
+            lara.robot.turn_off_jog()
             return {"error": "Force did not exceed threshold within 1000 iterations."}
-    # counter = 10
-    # for i in range(1000):
-    #     print(f"Second loop iteration {i+1}/100")
-    #     if json_data is not None:
-    #         if "force" in json_data:
-    #             force = float(json_data["force"])
-    #             print(f"Current force: {force}")
-    #             if force > pressure + wiggle_room:
-    #                 move_z = 0.3
-    #                 counter = 10
-    #                 print(f"Force {force} > pressure + wiggle_room. Setting move_z to {move_z} and resetting counter.")
-    #                 await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
-    #             elif force < pressure - wiggle_room:
-    #                 move_z = -0.3
-    #                 counter = 10
-    #                 print(f"Force {force} < pressure - wiggle_room. Setting move_z to {move_z} and resetting counter.")
-    #                 await lara.start_movement_slider(0, 0, move_z, 0, 0, 0)
-    #             else:
-    #                 counter -= 1
-    #                 print(f"Force within wiggle room. Decrementing counter to {counter}")
-    #                 if counter == 0:
-    #                     print("Counter reached zero. Exiting loop.")
-    #                     break
-    #         await asyncio.sleep(0.01)
-    await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
+    lara.robot.turn_off_jog()
     print("Stopped all movements.")
 @app.post("/EmergencyStop")
 def emergency_stop():

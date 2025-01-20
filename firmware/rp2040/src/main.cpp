@@ -387,6 +387,8 @@ void processCommand() {
 
 void setup() {
   Serial.begin(115200);
+  while (!Serial) delay(10);
+  Serial.println("Starting up...");
   thermo.begin(MAX31865_2WIRE);
   pinMode(pump_pwm,   OUTPUT);
   pinMode(fan_pwm,    OUTPUT);

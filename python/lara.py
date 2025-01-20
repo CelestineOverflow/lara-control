@@ -7,6 +7,7 @@ import numpy as np
 from scipy.spatial.transform import	Rotation as R
 from neura.neurapy.robot import	Robot
 from space import Pose,	Vector3, Quaternion, Euler,	PoseCartesian
+import requests
 
 logging.getLogger('socketio').setLevel(logging.ERROR)
 logging.getLogger('engineio').setLevel(logging.ERROR)
@@ -28,7 +29,9 @@ class Lara:
 		self.sio.on('Joint_Angle', self.__set_joint_angle)
 		self.sio.on('connect', self.on_connect)
 		self.sio.on('disconnect', self.on_disconnect)
-		self.sio.on('heartbeat_check', self.send_hearbeat)
+		self.sio.on('heartbeat_check', self.send_hearbeat_response)
+		self.sio.on('error', self.report_error)
+		self.sio.on('CollisionDetected', self.on_collision_effect)
 		self.max_rotation_speed = 0.2617994	# rad/s
 		self.max_translation_speed =	0.25	# m/s
 		self.pose: Pose = Pose(Vector3(0, 0, 0),	Quaternion(0, 0, 0, 1))
@@ -37,6 +40,11 @@ class Lara:
 		self.heartbeat_task = None
 		self.heartbeat_running =	False
 		self.cartesian_slider_data =	{}
+		self.collided = False
+		self.started_movement_slider = False
+
+	async def report_error(self, data):
+		print(f"Error: {data}")
 	async def __set_joint_angle(self, data) -> None:
 		self.joints = {
 			"joint1": data['A1'],
@@ -51,17 +59,44 @@ class Lara:
 			Vector3(x=data['X'],y=data['Y'], z=data['Z']),
 			Quaternion(x=data['_X'],y=data['_Y'], z=data['_Z'],	w=data['_W'])
 		)
+
+
+
+
+	async def on_collision_effect(self, args):
+		print(f"Collision detected: {args}")
+		await asyncio.sleep(2)
+		self.collided = True
+	async def reset_collision(self):
+		await self.sio.emit("reset_collision", {"reset": True})
+		await asyncio.sleep(0.5)
+		response = requests.get("http://192.168.2.13:8081/api/cartesian")
+		data = response.json()
+
+		self.collided = False
+	async def fetch_cartesian_pose(self):
+		response = requests.get("http://192.168.2.13:8081/api/cartesianpose")
+		data = response.json()
+		data = data[0]
+		self.pose = Pose(
+			Vector3(x=data['X'],y=data['Y'], z=data['Z']),
+			Quaternion(x=data['_X'],y=data['_Y'], z=data['_Z'],	w=data['_W'])
+		)
+
 	async def connect_socket(self):
 		if not self.sio.connected:
 			await self.sio.connect('http://192.168.2.13:8081')
+		await self.fetch_cartesian_pose()
 	async def on_connect(self):
 		print('connection established')
 	async def on_disconnect(self):
 		print('disconnected from	server')
-	async def send_hearbeat(self, *args):
-		"""Send a single	heartbeat."""
+
+	async def send_hearbeat_response(self, *args):
+		"""Send a heartbeat response to request."""
 		print("Sending heartbeat.")
 		await self.sio.emit("heartbeat_response", True)
+
 	async def run_heartbeats_in_background(self):
 		"""Background task that sends a heartbeat every 1 second
 		as long as slider calls keep	coming in <0.5s	intervals."""
@@ -131,6 +166,11 @@ class Lara:
 		We update the last_slider_call time here	to let
 		our background task know	we are still active.
 		"""
+		if not self.started_movement_slider:
+			self.started_movement_slider = True
+			response = requests.get("http://192.168.2.13:8081/api/cartesian")
+			data = response.json()
+			print(f"Cartesian Pose fetched: {data}")
 		self.last_slider_call = time.time()	# track	the	call time
 		data= {
 		'q0': q0, 'q1': q1, 'q2': q2, 'q3': q3, 'q4': q4, 'q5': q5,
@@ -141,6 +181,7 @@ class Lara:
 		await self.sio.emit('CartesianSlider', data)
 		
 	async def stop_movement_slider(self,	q0,	q1,	q2,	q3,	q4,	q5):
+		self.started_movement_slider = False
 		data	= {
 			'q0': q0, 'q1': q1, 'q2': q2, 'q3': q3, 'q4': q4, 'q5': q5,
 			'status': False,	'joint': False,	'cartesian': True, 'freedrive':	False,
@@ -189,6 +230,113 @@ class Lara:
 		steps.append(PoseCartesian(position=pose.position, orientation=pose.orientation.to_euler(order="xyz")))
 		#move
 		print(f"Moving to {steps}")
+		self.robot.set_mode("Automatic")
+		linear_property = {
+			"speed": 0.05,
+			"acceleration": 0.001,
+			"blend_radius": 0.005,
+			"target_pose": [
+				[step.position.x, step.position.y, step.position.z, step.orientation.x, step.orientation.y, step.orientation.z] for step in steps
+			],
+			"current_joint_angles": self.robot.robot_status("jointAngles"),
+			"weaving": False,
+			"pattern": 1,
+			"amplitude": 0.006,
+			"amplitude_left": 0.0,
+			"amplitude_right": 0.0,
+			"frequency": 1.5,
+			"dwell_time_left": 0.0,
+			"dwell_time_right": 0.0,
+			"elevation": 0.0,
+			"azimuth": 0.0
+		}
+		self.robot.unpause()
+		self.robot.move_linear(**linear_property)
+		print("Movement done")
+		self.robot.stop()
+		print("Stopped")
+		self.robot.set_mode("Teach")
+		print("Teach mode set")
+		return self.robot.robot_status("jointAngles")
+	
+	def move_to_pose_tag(self, pose: Pose):
+		print(f"Moving to pose: {pose}")
+        # First step: use the current pose
+		steps = []
+		steps.append(PoseCartesian(position=self.pose.position, orientation=self.pose.orientation.to_euler(order="xyz")))
+
+		# Second step: move 0.3 m along the local Z-axis (normal) of the current orientation
+		offset = np.array([0, 0, -0.3])
+		rotation_matrix = R.from_quat([
+			self.pose.orientation.x,
+			self.pose.orientation.y,
+			self.pose.orientation.z,
+			self.pose.orientation.w
+		]).as_matrix()
+		offset_global = rotation_matrix @ offset
+
+		new_position = Vector3(
+			self.pose.position.x + offset_global[0],
+			self.pose.position.y + offset_global[1],
+			self.pose.position.z + offset_global[2]
+		)
+
+		steps.append(PoseCartesian(position=new_position, orientation=self.pose.orientation.to_euler(order="xyz")))
+		#third step is target position + offset
+		offset = np.array([0, 0, -0.2])
+		rotation_matrix = R.from_quat([
+			pose.orientation.x,
+			pose.orientation.y,
+			pose.orientation.z,
+			pose.orientation.w
+		]).as_matrix()
+		offset_global = rotation_matrix @ offset
+		new_position = Vector3(
+			pose.position.x + offset_global[0],
+			pose.position.y + offset_global[1],
+			pose.position.z + offset_global[2]
+		)
+		steps.append(PoseCartesian(position=new_position, orientation=pose.orientation.to_euler(order="xyz")))
+		#move
+		print(f"Moving to {steps}")
+		self.robot.set_mode("Automatic")
+		linear_property = {
+			"speed": 0.03,
+			"acceleration": 0.001,
+			"blend_radius": 0.005,
+			"target_pose": [
+				[step.position.x, step.position.y, step.position.z, step.orientation.x, step.orientation.y, step.orientation.z] for step in steps
+			],
+			"current_joint_angles": self.robot.robot_status("jointAngles"),
+			"weaving": False,
+			"pattern": 1,
+			"amplitude": 0.006,
+			"amplitude_left": 0.0,
+			"amplitude_right": 0.0,
+			"frequency": 1.5,
+			"dwell_time_left": 0.0,
+			"dwell_time_right": 0.0,
+			"elevation": 0.0,
+			"azimuth": 0.0
+		}
+		self.robot.unpause()
+		self.robot.move_linear(**linear_property)
+		print("Movement done")
+		self.robot.stop()
+		print("Stopped")
+		self.robot.set_mode("Teach")
+		print("Teach mode set")
+		return self.robot.robot_status("jointAngles")
+	
+	def move_to_pose_relative(self, pose: Pose):
+		print(f"Moving to pose: {pose}")
+        # First step: use the current pose
+		steps = []
+		steps.append(PoseCartesian(position=self.pose.position, orientation=self.pose.orientation.to_euler(order="xyz")))
+		#second step is the target position 
+		pose.position.z = self.pose.position.z
+		steps.append(PoseCartesian(position=pose.position, orientation=self.pose.orientation.to_euler(order="xyz")))
+		#move
 		self.robot.set_mode("Automatic")
 		linear_property = {
 			"speed": 0.03,
