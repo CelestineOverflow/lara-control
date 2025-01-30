@@ -6,13 +6,17 @@
     import { RectAreaLightHelper } from "three/examples/jsm/helpers/RectAreaLightHelper.js";
     import ThreeMeshUI from "three-mesh-ui";
     import RobotData from "./RobotData.svelte";
-    import {ApriltagDetection, AprilTagRelativePosition, AprilTagRotation, Pose, robotJoints, trayPoses} from "$lib/coordinate";
+    import {
+        Pose,
+        robotJoints,
+        TargetPose,
+        trayPoses,
+    } from "$lib/coordinate";
     import { Lara } from "./robotics/lara";
-    import Apriltag from "./Apriltag.svelte";
-    import { Pane, Splitpanes } from 'svelte-splitpanes';
+    import { Pane, Splitpanes } from "svelte-splitpanes";
+    import ObjectControl from "$lib/ObjectControl";
     //Enviroment Variable
     let canvas: HTMLCanvasElement;
-    let cv_canvas: HTMLCanvasElement;
     let scene: THREE.Scene;
     let camera: any;
     let renderer: THREE.WebGLRenderer;
@@ -20,14 +24,22 @@
     let controls: OrbitControls;
     let resizeObserver: ResizeObserver;
     let container: HTMLDivElement;
+    let controlsObject: ObjectControl;
     //Robot Varibles
-    let laraArm : Lara;
-    let clock : THREE.Clock;
-    let stream: MediaStream | null = null;
-    let enabled = false;
-    
+    let laraArm: Lara;
+    let clock: THREE.Clock;
+    // Enviroment visual
     let GeneralSceneGLB: THREE.Group | null = null;
     let arrowHelper: THREE.ArrowHelper | null = null;
+   
+    let canvas_overlay_rendered: THREE.WebGLRenderer;
+    let canvas_overlay: HTMLCanvasElement;
+    let camerahtml: any;
+    let tCube: THREE.Mesh;
+
+    let customFOV = 75;
+
+
     function addLights() {
         const light0 = new THREE.PointLight(0xff0000, 4, 100);
         light0.position.set(0, 1, 0);
@@ -51,13 +63,10 @@
         scene.add(new RectAreaLightHelper(rectLight1));
         scene.add(new RectAreaLightHelper(rectLight2));
         scene.add(new RectAreaLightHelper(rectLight3));
-        
     }
 
-
     const cubegeo = new THREE.BoxGeometry(0.01, 0.01, 0.01);
-    const cubemat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-
+    const cubemat = new THREE.MeshBasicMaterial({ color: 0xff0000 , wireframe: true});
 
     let cubes = [];
     function addTrayMarkers(poses: Pose[]) {
@@ -66,57 +75,73 @@
         cubes = [];
         // Add new cubes
         poses.forEach((pose) => {
+            const mesh = new THREE.Mesh(cubegeo, cubemat);
+            mesh.setRotationFromQuaternion(pose.rotation);
+            mesh.position.copy(pose.position);
+            scene.add(mesh);
+            cubes.push(mesh);
+        });
+    }
+
+
+    let targetMarker: THREE.Mesh | null = null;
+    function addSingleTargetMarker(pose: Pose) {
+        //check if scene is loaded
+        if (!scene) return;
+        if (targetMarker) scene.remove(targetMarker);
         const mesh = new THREE.Mesh(cubegeo, cubemat);
         mesh.setRotationFromQuaternion(pose.rotation);
         mesh.position.copy(pose.position);
         scene.add(mesh);
-        cubes.push(mesh);
-        });
+        targetMarker = mesh;
+    }
+    let boxWidth = 1.0;
+    let boxHeight = 1.0;
+    let boxDepth = 1.0;
+
+    function addBox() {
+        objectControl?.addBox(boxWidth, boxHeight, boxDepth);
+    }
+    function setTransformMode(mode) {
+        objectControl?.setTransformMode(mode);
     }
 
-    let offscreenRenderer: THREE.WebGLRenderer;
-    let overlayRenderer: THREE.WebGLRenderer;
-    let cv_overlay: HTMLCanvasElement;
-    let tCube: THREE.Mesh;
+ 
 
-    function setupOffscreen(){
-        cv_canvas.width = 1000;
-        cv_canvas.height = 1000;
-        stream = cv_canvas.captureStream();
-        // offscreen rendered setup
-        offscreenRenderer = new THREE.WebGLRenderer({
-            canvas: cv_canvas,
+    function setupOverlayRender() {
+        // Set fixed width and height to 720p (1280x720)
+        canvas_overlay_rendered = new THREE.WebGLRenderer({
+            canvas: canvas_overlay,
         });
-        offscreenRenderer.autoClear = false;
-        offscreenRenderer.setSize(1000,1000);
-        //make a pseudo canvas on top of the offscreen canvas
-        cv_overlay.width = 1000;
-        cv_overlay.height = 1000;
-        overlayRenderer = new THREE.WebGLRenderer({
-            canvas: cv_overlay,
-        });
-        overlayRenderer.autoClear = false;
-        overlayRenderer.setSize(1000,1000);
-        // Add the overlay items
-        tCube = new THREE.Mesh(
-            new THREE.BoxGeometry(0.075, 0.075, 0.075),
-            new THREE.MeshBasicMaterial({ color: 0xff0000 , wireframe: true})
-        );
-        tCube.position.set(1, 1, 1);
-        scene.add(tCube);
+
+        canvas_overlay_rendered.setClearColor(0x000000, 0);
+        canvas_overlay_rendered.autoClear = false;
+        canvas_overlay_rendered.setSize(1280, 720);
         arrowHelper = new THREE.ArrowHelper(
             new THREE.Vector3(0, 0, 1),
             new THREE.Vector3(0, 0, 0),
             0.5,
             0xff0000,
             0.1,
-            0.05
+            0.05,
         );
         scene.add(arrowHelper);
+    }
 
 
+    function overlayResizeHandler() {
+        //keer the render aspect ratio to 16:9
+
+    // if (!camerahtml) return;
+    // const rect = camerahtml.getBoundingClientRect();
+    // const width = rect.width;
+    // const height = rect.height;
+    // camera.aspect = 1280 / 720;
+    // camera.updateProjectionMatrix();
+    // canvas_overlay_rendered.setSize(width, height);
 
     }
+
 
     onMount(() => {
         //init clock
@@ -134,19 +159,29 @@
         // Initialize renderer
         renderer = new THREE.WebGLRenderer({ canvas });
 
-        setupOffscreen();
+        setupOverlayRender();
         renderer.setSize(width, height);
         // Initialize controls
         controls = new OrbitControls(camera, renderer.domElement);
         controls.update();
+        // Setup object control
+        controlsObject = new ObjectControl({
+            scene,
+            camera,
+            renderer,
+            controls,
+            domElement: renderer.domElement,
+        });
+
         // Add lights
         addLights();
         // add gtlf model
-        let gtlfloader = new GLTFLoader();
-        gtlfloader.load("gtlf/GeneralScene.glb", (gltf) => {
-            GeneralSceneGLB = gltf.scene;
-            scene.add(GeneralSceneGLB);
-        });
+        // let gtlfloader = new GLTFLoader();
+        // gtlfloader.load("gtlf/GeneralScene.glb", (gltf) => {
+        //     GeneralSceneGLB = gltf.scene;
+
+        //     scene.add(GeneralSceneGLB);
+        // });
         // Load the robot
         laraArm = new Lara(scene);
         // Handle canvas resize
@@ -159,6 +194,7 @@
         }
 
         function animate() {
+            // overlayResizeHandler();
             ThreeMeshUI.update();
             CanvasSizeHandler();
             animationId = requestAnimationFrame(animate);
@@ -174,7 +210,8 @@
                 laraArm.joint5.set($robotJoints.joint5);
                 laraArm.joint6.set($robotJoints.joint6);
             }
-            offscreenRenderer.clear(); // Clear the offscreen renderer before rendering
+            // Clear the offscreen renderer before rendering
+            canvas_overlay_rendered.clear();
             if (laraArm.camera) {
                 if (arrowHelper) {
                     arrowHelper.visible = false;
@@ -182,12 +219,23 @@
                 if (tCube) {
                     tCube.visible = false;
                 }
-                offscreenRenderer.render(scene, laraArm.camera);
+                canvas_overlay_rendered.render(scene, laraArm.camera);
                 //hide general scene
                 if (GeneralSceneGLB) {
                     GeneralSceneGLB.visible = false;
                 }
-                overlayRenderer.render(scene, laraArm.camera);
+                //set camera asperct ratio
+                if (laraArm.camera) {
+                    //set fov
+                    laraArm.camera.fov = customFOV;
+                    const rect = camerahtml.getBoundingClientRect();
+                    const width = rect.width;
+                    const height = rect.height;
+                    laraArm.camera.aspect = width / height;
+                    laraArm.camera.updateProjectionMatrix();
+                    canvas_overlay_rendered.setSize(width, height);
+                }
+                canvas_overlay_rendered.render(scene, laraArm.camera);
                 if (arrowHelper) {
                     arrowHelper.visible = true;
                 }
@@ -197,7 +245,6 @@
                 if (GeneralSceneGLB) {
                     GeneralSceneGLB.visible = true;
                 }
-                Overlay();
             }
         }
 
@@ -212,83 +259,92 @@
         renderer.dispose();
     });
 
-
     trayPoses.subscribe((poses) => {
         addTrayMarkers(poses);
     });
-
-    function Overlay() {
-        if ($ApriltagDetection && $ApriltagDetection.length > 0) {
-            $ApriltagDetection.forEach((det) => {
-                if (tCube) {
-                    // Get the rotation vector (q) and translation vector (p) from solvePnP
-                    let factor = 0.43; 
-                    let p = $AprilTagRelativePosition; // Translation vector from solvePnP
-                    let quaternion = $AprilTagRotation;   // Quat 
-                    // Adjust the translation vector to match Three.js coordinate system
-                    p = new THREE.Vector3(p.z, p.y, p.x);
-                    p.multiplyScalar(factor);
-                    console.log(`Apriltag pos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`);
-                    // Get camera position and rotation in world coordinates
-                    let cameraPosition = new THREE.Vector3();
-                    let cameraRotation = new THREE.Quaternion();
-                    laraArm.camera?.getWorldPosition(cameraPosition);
-                    laraArm.camera?.getWorldQuaternion(cameraRotation);
-                    // Use the forward direction the camera is looking at
-                    let eulerCamera = new THREE.Euler();
-                    //use the direction the camera is looking at
-                    tCube.position.set(cameraPosition.x, cameraPosition.y - .3, cameraPosition.z);
-                    eulerCamera.setFromQuaternion(cameraRotation);
-                    // console.log(`Camera rot: ${eulerCamera.x.toFixed(2)}, ${eulerCamera.y.toFixed(2)}, ${eulerCamera.z.toFixed(2)}`);
-                    let adjustedCameraRotation = cameraRotation.clone().multiply(new THREE.Quaternion(-0.5, 0.5, 0.5, -0.5));
-                    eulerCamera.setFromQuaternion(adjustedCameraRotation);
-                    // console.log(`d Camera rot: ${eulerCamera.x.toFixed(2)}, ${eulerCamera.y.toFixed(2)}, ${eulerCamera.z.toFixed(2)}`);
-                    let eulerApriltag = new THREE.Euler();
-                    eulerApriltag.setFromQuaternion(quaternion);
-                    // console.log(`Apriltag rot: ${eulerApriltag.x.toFixed(2)}, ${eulerApriltag.y.toFixed(2)}, ${eulerApriltag.z.toFixed(2)}`);
-                    quaternion = quaternion.clone().multiply(adjustedCameraRotation);
-                    tCube.rotation.setFromQuaternion(quaternion);
-                    console.log(`Camera Pos: ${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}, ${cameraPosition.z.toFixed(2)}`);
-                    tCube.position.set(cameraPosition.x + p.x, cameraPosition.y - p.y, cameraPosition.z - p.z);
-                    console.log(`Cube pos: ${tCube.position.x.toFixed(2)}, ${tCube.position.y.toFixed(2)}, ${tCube.position.z.toFixed(2)}`);
-                    arrowHelper?.setDirection(new THREE.Vector3(0, -1, 0).applyQuaternion(quaternion));
-                    arrowHelper?.position.copy(cameraPosition);
-                }
-            });
-        }
-    }
+    TargetPose.subscribe((pose) => {
+        addSingleTargetMarker(pose);
+    });
     // http://localhost:1692/my_camera
 </script>
 
-
-<button on:click={() => enabled = !enabled}>{enabled ? "Disable" : "Enable"}</button>
-{#if enabled}
-    <Apriltag {stream}  />
-{/if}
-
-<Splitpanes  horizontal={true}>
-<Pane snapSize={10}>
-<!-- Your main canvas pane -->
-<div bind:this={container} style="width: 100%; height: 800px; position: relative;">
-<canvas bind:this={canvas} style="display: block;"></canvas>
-<div style="position: absolute; top: 10px; right: 10px; color: white; z-index: 1;">
-<RobotData/>
+<div class="overlay">
+    <label>
+        Box Width
+        <input type="number" bind:value={boxWidth} step="0.1" />
+    </label>
+    <label>
+        Box Height
+        <input type="number" bind:value={boxHeight} step="0.1" />
+    </label>
+    <label>
+        Box Depth
+        <input type="number" bind:value={boxDepth} step="0.1" />
+    </label>
+    <button on:click={addBox}>Add Box</button>
+    <hr />
+    <button on:click={() => setTransformMode("translate")}>Move</button>
+    <button on:click={() => setTransformMode("rotate")}>Rotate</button>
+    <button on:click={() => setTransformMode("scale")}>Scale</button>
+    <input type="number" bind:value={customFOV} step="1" />
 </div>
-</div>
-</Pane>
-<Pane>
-<!-- Wrap canvases in a relative container -->
-<div style="width: 100%; height: 100%; position: relative; display: none;">
-<canvas
-        bind:this={cv_canvas}
-        style="position: absolute; top: 0; left: 0; width: 30%; height: 30%;"
-></canvas>
-<canvas
-        bind:this={cv_overlay}
-        style="position: absolute; top: 0; left: 0; width: 30%; height: 30%;"
-></canvas>
-</div>
-<img src="http://localhost:1692/my_camera" alt="Camera feed" />
 
-</Pane>
+
+<Splitpanes horizontal={true}>
+    <Pane snapSize={10}>
+        <!-- Your main canvas pane -->
+
+        <div
+            bind:this={container}
+            style="width: 100%; height: 800px; position: relative;"
+        >
+            <canvas bind:this={canvas} style="display: block;"></canvas>
+            <div
+                style="position: absolute; top: 10px; right: 10px; color: white; z-index: 1;"
+            >
+                <RobotData />
+            </div>
+        </div>
+    </Pane>
+    <Pane>
+        <div style="width: 100%; height: 100%; position: relative;">
+            <!-- The camera feed -->
+            <img
+            width="1280"
+            height="720"
+            bind:this={camerahtml}
+            src="http://localhost:1692/my_camera"
+            alt="Camera feed"
+            style="width: 1280px; height: 720px; position: absolute; top: 0; left: 0;"
+            on:load={overlayResizeHandler}
+            />
+            <!-- The overlay canvas -->
+            <canvas
+            width="1280"
+            height="720"
+            bind:this={canvas_overlay}
+            style="position: absolute; top: 0; left: 0; background: transparent; width: 1280px; height: 720px;"
+            ></canvas>
+        </div>
+    </Pane>
 </Splitpanes>
+
+<style>
+    .overlay {
+        position: absolute;
+        top: 5em;
+        left: 1rem;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 1rem;
+        border-radius: 4px;
+        z-index: 10;
+    }
+    .overlay label,
+    .overlay input {
+        display: block;
+    }
+    .overlay button {
+        margin-top: 0.5rem;
+        margin-right: 0.5rem;
+    }
+</style>

@@ -52,6 +52,7 @@ export class Pose {
 }
 
 export const trayPoses: Writable<Pose[]> = writable([]);
+export const TargetPose: Writable<Pose> = writable(new Pose(new THREE.Vector3(0, 0, 0), new THREE.Quaternion(0, 0, 0, 1)));
 
 /** Stores current robot joints. */
 export interface RobotJoints {

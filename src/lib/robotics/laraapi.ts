@@ -2,7 +2,7 @@
 import socketIOClient from 'socket.io-client';
 import { get, writable } from 'svelte/store';
 import { toRad } from './utils';
-import { isPaused, Pose, robotJoints, trayPoses } from '$lib/coordinate';
+import { isPaused, Pose, robotJoints, TargetPose, trayPoses } from '$lib/coordinate';
 import { Vector3, Quaternion } from 'three';
 //very important  npm install socket.io-client@2 --save
 let isConnected = false;
@@ -15,12 +15,15 @@ let socket: any;
 export function setupSocket() {
     socket = socketIOClient("http://192.168.2.13:8081");
 
+     
     socket.on("connect", async () => {
         console.log(`Connected with socket ID: ${socket.id}`);
         isConnected = true;
         console.log("Connected and emitted events.");
         await fetch_cartesian_pose();
         await fetch_joints_angle();
+        await getTray();
+        await getTargetPose();
     });
 
     socket.on("heartbeat_check", () => {
@@ -246,7 +249,6 @@ export async function getTray() {
                 Accept: "application/json",
             },
         });
-        console.log("Get tray response:", response);
         const data = await response.json();
         trayPoses.set([]);
         data.forEach((element: any) => {
@@ -264,6 +266,115 @@ export async function getTray() {
     catch (error) {
         console.error("Error:", error);
     }
+}
+
+
+export async function setSocket() {
+    try {
+        const response = await fetch("http://localhost:1442/setSocket", {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("Set target pose response:", data);
+
+        const pose = new Pose(
+            new Vector3(data.position[0], data.position[2], -data.position[1]),
+            new Quaternion(data.orientation[0], data.orientation[2], -data.orientation[1], data.orientation[3])
+        );
+
+        TargetPose.set(pose);
+    } catch (error) {
+        console.error("Error setting target pose:", error);
+    }
+}
+
+export async function getTargetPose() {
+    try {
+        const response = await fetch("http://localhost:1442/getSocket", {
+            method: "GET",
+            headers: {
+                Accept: "application/json",
+            },
+        });
+        const data = await response.json();
+        const pose = new Pose(
+            new Vector3(data.position[0], data.position[2], -data.position[1]),
+            new Quaternion(data.orientation[0], data.orientation[2], -data.orientation[1], data.orientation[3])
+          );
+        TargetPose.set(pose);
+    }
+    catch (error) {
+        console.error("Error:", error);
+    }
+}
+
+
+export async function setBrightness(newBrightness: number) {
+    if (!isConnected) {
+        console.error("Not connected to the robot.");
+        return;
+    }
+    fetch(`http://localhost:1442/setBrightness?newBrightness=${newBrightness}`, {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+        },
+    });
+}
+
+export let leds = [0, 0, 0, 0, 0, 0, 0]; // Initialize LED states
+
+export async function setLeds() {
+    if (!isConnected) {
+        console.error("Not connected to the robot.");
+        return;
+    }
+
+    fetch(`http://localhost:1442/setLeds`, {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ leds }),
+    });
+}
+
+export async function setHSL(hue: number, sat: number, light: number) {
+    if (!isConnected) {
+        console.error("Not connected to the robot.");
+        return;
+    }
+    fetch(`http://localhost:1442/setHSL?hue=${hue}&sat=${sat}&light=${light}`, {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+        },
+    });
+}
+
+export let heater = writable(0);
+
+export async function setHeater(newHeat: number) {
+    heater.set(newHeat);
+    if (!isConnected) {
+        console.error("Not connected to the robot.");
+        return;
+    }
+    fetch(`http://localhost:1442/setHeater?newHeat=${newHeat}`, {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+        },
+    });
 }
 
 
@@ -369,5 +480,41 @@ export async function fetch_joints_angle(): Promise<void> {
         });
     } catch (error) {
         console.error("Error:", error);
+    }
+}
+
+export let states = ["normal", "square_detector", "tag_detector"];
+export let current_state_index = writable(0);
+
+export async function set_state(state: string): Promise<void> {
+    try {
+        const response = await fetch(`http://localhost:1447/set_state/${state}`, {
+            method: "POST",
+            headers: {
+                "accept": "application/json",
+            },
+        });
+        if (!response.ok) {
+            console.error("Failed to set state");
+        }
+    } catch (error) {
+        console.error("Error setting state", error);
+    }
+}
+
+
+export async function set_camera(index: number): Promise<void> {
+    try {
+        const response = await fetch(`http://localhost:1447/set_camera/${index}`, {
+            method: "POST",
+            headers: {
+                "accept": "application/json",
+            },
+        });
+        if (!response.ok) {
+            console.error("Failed to set camera");
+        }
+    } catch (error) {
+        console.error("Error setting camera", error);
     }
 }

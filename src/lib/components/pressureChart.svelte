@@ -11,10 +11,7 @@
   let target_pressure_in_grams = 0.0;
 
   onMount(() => {
-    // 1) Create a new worker (same worker file as your temperature chart)
     const worker = new ChartWorker();
-
-    // 2) Transfer this new canvas to OffscreenCanvas
     const offscreen = canvas.transferControlToOffscreen();
     worker.postMessage(
       {
@@ -23,12 +20,9 @@
       },
       [offscreen]
     );
-
-    // 3) Subscribe to your store and send updates to this Worker
     const unsubscribe = loadcell_value.subscribe((value) => {
-      const tempTarget = value; // or parse if needed
-      const tempCurrent = value; // or parse if needed
-
+      const tempTarget = value;
+      const tempCurrent = value; 
       if (isNaN(tempTarget) || isNaN(tempCurrent)) {
         return;
       }

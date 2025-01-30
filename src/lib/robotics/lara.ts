@@ -1,5 +1,5 @@
 import URDFLoader, { type URDFRobot } from "urdf-loader";
-import { Scene, LoadingManager, Quaternion, Vector3,SkinnedMesh,Skeleton,MeshPhongMaterial,CylinderGeometry,SkeletonHelper,Bone, PerspectiveCamera, BoxGeometry, MeshBasicMaterial, Mesh} from "three";
+import { Scene, LoadingManager, Quaternion, Vector3,SkinnedMesh,Skeleton,MeshPhongMaterial,CylinderGeometry,SkeletonHelper,Bone, PerspectiveCamera, BoxGeometry, MeshBasicMaterial, Mesh, CameraHelper} from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { CCDIKSolver } from "three/examples/jsm/animation/CCDIKSolver.js";
 import { toRad } from "./utils";
@@ -32,6 +32,7 @@ export class Lara {
     iks : any;
     ikSolver : any;
     camera : PerspectiveCamera | undefined;
+    camera_helper : CameraHelper | undefined;
     helper : any;
     constructor(scene: Scene) {
         // Initialize joints with their names and default values
@@ -87,10 +88,12 @@ export class Lara {
                     model.rotation.set(0, 0, 0);
                     lastMesh.add(model);
                     //add camera
-                    this.camera = new PerspectiveCamera(75, 1, 0.01, 1000);
+                    this.camera = new PerspectiveCamera(60, 1, 0.01, 1000);
+                    this.camera_helper = new CameraHelper(this.camera);
+                    scene.add(this.camera_helper);
                     lastMesh.add(this.camera);
                     //move camera relative to the robot down y axis
-                    this.camera.position.set(0, -0.3, 0);
+                    this.camera.position.set(0, -0.27, -0.02);
                     //rotate camera to look straight down
                     this.camera.rotation.set(toRad(-90), 0, 0);
                 });

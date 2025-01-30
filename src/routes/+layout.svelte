@@ -1,6 +1,12 @@
 <script>
+    import { onMount } from "svelte";
     import NavBar from "$lib/NavBar.svelte";
     import "../app.css";
+    import { setupSocket } from "$lib/robotics/laraapi";
+
+    onMount(() =>  {
+        setupSocket();
+    });
 </script>
 
 <NavBar />

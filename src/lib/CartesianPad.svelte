@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { setTranslationSpeed, setupSocket, startMovementSlider, stopMovementSlider, max_rotation_speed, max_translation_speed, setRotationalSpeed } from "./robotics/laraapi";
+    import { setTranslationSpeed, startMovementSlider, stopMovementSlider, max_rotation_speed, max_translation_speed, setRotationalSpeed } from "./robotics/laraapi";
     import { onMount } from "svelte";
-    import { loadcell_value, robotJoints } from "./coordinate";
-    import { degToRad, radToDeg } from "three/src/math/MathUtils.js";
+    import {  robotJoints } from "./coordinate";
+    import {  radToDeg } from "three/src/math/MathUtils.js";
     import * as THREE from "three";
     onMount(() => {
         // Connect to the robot API
-        setupSocket();
+        
     });
     let moveInterval: any = null;
     let moveAlongNormal: boolean = false; // Toggle for moving along robot's local axes

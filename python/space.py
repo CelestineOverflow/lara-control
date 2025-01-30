@@ -261,25 +261,7 @@ class Matrix3:
         return self @ vector
     
 
-class Pose():
-    position: Vector3
-    orientation: Quaternion
-    def __init__(self, position: Vector3, orientation: Quaternion):
-        self.position = position
-        self.orientation = orientation
 
-    def to_dict(self) -> dict:
-        return {
-            "position": self.position.to_list(),
-            "orientation": self.orientation.to_list()
-        }
-    
-    @staticmethod
-    def from_json(data) -> 'Pose':
-        return Pose(
-            position=Vector3(*data['position']),
-            orientation=Quaternion(*data['orientation'])
-        )
 
 class PoseCartesian():
     position: Vector3
@@ -403,3 +385,26 @@ class Matrix4:
        Same as using the * operator if you prefer that syntax.
        """
        return self * v
+   
+class Pose():
+    position: Vector3
+    orientation: Quaternion
+    def __init__(self, position: Vector3, orientation: Quaternion):
+        self.position = position
+        self.orientation = orientation
+
+    def to_dict(self) -> dict:
+        return {
+            "position": self.position.to_list(),
+            "orientation": self.orientation.to_list()
+        }
+    
+    @staticmethod
+    def from_json(data) -> 'Pose':
+        return Pose(
+            position=Vector3(*data['position']),
+            orientation=Quaternion(*data['orientation'])
+        )
+    
+    def to_Cartesian(self) -> PoseCartesian:
+        return PoseCartesian(self.position, self.orientation.to_euler())

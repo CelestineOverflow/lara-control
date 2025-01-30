@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from "svelte";
 	import Modal from "$lib/components/Modal.svelte";
 	import * as THREE from "three";
+    import { setSocket } from "./robotics/laraapi";
 	// Define the Waypoint interface
 	interface Waypoint {
 		name: string;
@@ -12,18 +12,17 @@
 	const columns = Array.from({ length: 8 }, (_, index) =>
 		String.fromCharCode(65 + index),
 	).reverse(); // ['H', 'G', ..., 'A']
-	const rows = Array.from({ length: 22 }, (_, index) => index).reverse();
+	const rows = Array.from({ length: 21 }, (_, index) => index).reverse();
 	let tab_selected = 1;
 
 	let customOffsetXmm = 0;
 	let customOffsetYmm = 0;
 
 
-    function moveToCell(arg0: string): any {
-		let x = arg0.charCodeAt(0) - 65;
-		let y = parseInt(arg0[1]);
+    function moveToCell(x: string, y: number) {
+		const _x = x.charCodeAt(0) - 65;
 		console.log(x, y);
-		const response = fetch(`http://localhost:1442/moveToCell?row=${y}&col=${x}&offset_z=0`, {
+		const response = fetch(`http://localhost:1442/moveToCell?row=${_x}&col=${y}&offset_z=0`, {
 			method: "POST",
 			headers: {
 				"accept": "application/json",
@@ -31,19 +30,6 @@
 		});
 		console.log(response);
 		
-    }
-
-
-    async function setSocket() {
-		//
-        const response = await fetch("http://localhost:1442/setSocket", {
-			method: "POST",
-			headers: {
-				"accept": "application/json",
-			},
-		});
-		const data = await response.json();
-		console.log(data);
     }
 
 
@@ -57,12 +43,6 @@
 		const data = await response.json();
 		console.log(data);
     }
-// 	curl -X 'POST' \
-//   'http://localhost:1442/moveUntilPressure?pressure=1000&wiggle_room=300' \
-//   -H 'accept: application/json' \
-//   -d ''
-// Request
-
     async function press() {
 		const response = await fetch("http://localhost:1442/moveUntilPressure?pressure=1000&wiggle_room=300", {
 			method: "POST",
@@ -196,7 +176,8 @@
 									<button
 										class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-2 rounded"
 										on:click={() =>
-											moveToCell(`${column}${row}`)}
+											moveToCell(column, row)
+										}
 									>
 										{column}{row}
 									</button>

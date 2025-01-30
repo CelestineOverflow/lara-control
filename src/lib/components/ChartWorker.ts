@@ -1,7 +1,5 @@
 /// <reference lib="webworker" />
-
-import Chart from "chart.js/auto"; // adjust import if needed
-
+import Chart from "chart.js/auto";
 let chart: Chart | null = null;
 
 self.onmessage = (event) => {
@@ -44,7 +42,7 @@ self.onmessage = (event) => {
         options: {
           spanGaps: true,
           animation: false,
-          responsive: false,   // OffscreenCanvas won't auto-resize
+          responsive: true,   
           maintainAspectRatio: false,
           scales: {
             y: {

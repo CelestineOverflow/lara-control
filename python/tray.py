@@ -8,15 +8,12 @@ class Tray:
     def __init__(
         self,
         pose: Pose,
-        offsets: Vector3 = Vector3(-0.016, 0.014605, 0.0),
-        rows: int = 3,
-        cols: int = 3,
+        offsets: Vector3 = Vector3(-0.014605, 0.016, 0.0),
+        rows: int = 8,
+        cols: int = 21,
     ):
         self.pose = pose  
         self.original_orientation = self.pose.orientation
-        # rotate the quat by 30 deg in x axis
-        offset = Euler(0.0, 0.0, Euler.to_rad(24)).to_quaternion()
-        self.pose.orientation = self.pose.orientation * offset
         self.offsets = offsets
         self.rows = rows
         self.cols = cols
@@ -51,15 +48,8 @@ class Tray:
             Vector3(data['pose']['position']['x'], data['pose']['position']['y'], data['pose']['position']['z']),
             Quaternion(data['pose']['orientation']['x'], data['pose']['orientation']['y'], data['pose']['orientation']['z'], data['pose']['orientation']['w'])
         )
-        offsets = Vector3(
-            data['offsets']['x'],
-            data['offsets']['y'],
-            data['offsets']['z']
-        )
-        rows = data['rows']
-        cols = data['cols']
-        return cls(pose, offsets, rows, cols)
-
+        return cls(pose, Vector3(data['offsets']['x'], data['offsets']['y'], data['offsets']['z']), data['rows'], data['cols'])
+    
 
 
     def get_cell_position(self, row: int, col: int) -> Pose:

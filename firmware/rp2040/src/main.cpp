@@ -14,6 +14,7 @@
 
 // Temperature boundaries
 #define MIN_TEMP     -60.0
+#define PRESSURE_SENSOR_PIN 27
 #define MAX_TEMP     250.0
 
 // PID constants
@@ -206,9 +207,28 @@ void serial_connected_sequence() {
 bool firstrun = true;
 DynamicJsonDocument start_json(256);
 
+static long total = 0;
+#define PICK_SENSOR_THRESHOLD 200
+#define READ_COUNT 100
+
+long pick_sensor(){
+  total = 0;
+  for (int i = 0; i < READ_COUNT; i++)
+  {
+    total += analogRead(PRESSURE_SENSOR_PIN);
+  }
+  total = total / 100;
+  return total;
+}
+
+
 void reportState() {
   DynamicJsonDocument doc(256);
   bool somethingChanged = false;
+
+  // 0) report pump_sensor
+  doc["pump_sensor"] = pick_sensor();
+
 
   // 1) Pump
   if (pump_percentage != oldPump) {
