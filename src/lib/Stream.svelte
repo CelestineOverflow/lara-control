@@ -265,10 +265,10 @@
     TargetPose.subscribe((pose) => {
         addSingleTargetMarker(pose);
     });
-    // http://localhost:1692/my_camera
+    // http://192.168.2.209:1692/my_camera
 </script>
 
-<div class="overlay">
+<!-- <div class="overlay">
     <label>
         Box Width
         <input type="number" bind:value={boxWidth} step="0.1" />
@@ -287,7 +287,7 @@
     <button on:click={() => setTransformMode("rotate")}>Rotate</button>
     <button on:click={() => setTransformMode("scale")}>Scale</button>
     <input type="number" bind:value={customFOV} step="1" />
-</div>
+</div> -->
 
 
 <Splitpanes horizontal={true}>
@@ -313,7 +313,7 @@
             width="1280"
             height="720"
             bind:this={camerahtml}
-            src="http://localhost:1692/my_camera"
+            src="http://192.168.2.209:1692/my_camera"
             alt="Camera feed"
             style="width: 1280px; height: 720px; position: absolute; top: 0; left: 0;"
             on:load={overlayResizeHandler}

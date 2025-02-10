@@ -164,7 +164,7 @@ async def offer(sdp_offer: dict):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="localhost", port=1446, reload=False, workers=1)
+    uvicorn.run(app, host="192.168.2.209", port=1446, reload=False, workers=1)
 
     # When the server stops, stop the display thread
     frame_queue.put(None)

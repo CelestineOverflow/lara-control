@@ -256,7 +256,7 @@ export class Lara {
     }
     public async moveRealRobot() {
         console.log("trying to move robot arm");
-        const url = "http://localhost:1442/pose";
+        const url = "http://192.168.2.209:1442/pose";
         const data = {
             joint1: this.joint1.value,
             joint2: this.joint2.value,

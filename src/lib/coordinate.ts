@@ -97,16 +97,18 @@ export const robotJoints: Writable<RobotJoints> = writable({
 let ws: WebSocket;
 
 export const isPaused: Writable<boolean> = writable(false);
+export const error: Writable<{}> = writable({});
+export const warning: Writable<{}> = writable({});
 
 export let data = writable({});
 export function connectApi() {
-    ws = new WebSocket('ws://localhost:1442/ws');
+    ws = new WebSocket('ws://192.168.2.209:1442/ws');
+    console.log("connecting to api")
     ws.onopen = () => {
         console.log('Connected to API');
     };
     ws.onmessage = (event) => {
         const temp = JSON.parse(event.data);
-        // console.log(JSON.stringify(temp));
         if (temp.hasOwnProperty("force")) {
             loadcell_value.set(parseFloat(temp.force));
         }
@@ -117,6 +119,15 @@ export function connectApi() {
         if (temp.hasOwnProperty("is_paused")){
             isPaused.set(temp.is_paused);
         }
+
+        if (temp.hasOwnProperty("error")) {
+            error.set(temp.error);
+        }
+        if (temp.hasOwnProperty("warning")) {
+            warning.set(temp.warning);
+        }
+        
+
         data.set(temp);
         
     };
@@ -127,7 +138,7 @@ export function connectApi() {
 
 let ws_image: WebSocket;
 export function connectImage() {
-    ws_image = new WebSocket('ws://localhost:1443/ws');
+    ws_image = new WebSocket('ws://192.168.2.209:1443/ws');
     ws_image.onopen = () => {
         console.log('Connected to Image');
     };

@@ -175,7 +175,7 @@ void clearError() {
 }
 
 void serial_connected_sequence() {
-  tare();
+  // tare();
   // turn on pump, fan
   pump_percentage = 100;
   fan_percentage  = 100;
@@ -331,7 +331,9 @@ void processCommand() {
     Serial.println("Connected! Reporting state...");
     serial_connected_sequence();
   }
-
+  if (!doc["tare"].isNull()) {
+    tare();
+  }
   if (!doc["pump"].isNull()) {
     int val = constrain(doc["pump"].as<int>(), 0, 100);
     pump_percentage = val;

@@ -22,7 +22,7 @@
     function moveToCell(x: string, y: number) {
 		const _x = x.charCodeAt(0) - 65;
 		console.log(x, y);
-		const response = fetch(`http://localhost:1442/moveToCell?row=${_x}&col=${y}&offset_z=0`, {
+		const response = fetch(`http://192.168.2.209:1442/moveToCell?row=${_x}&col=${y}&offset_z=0`, {
 			method: "POST",
 			headers: {
 				"accept": "application/json",
@@ -33,26 +33,7 @@
     }
 
 
-    async function goToSocket() {
-		const response = await fetch("http://localhost:1442/moveToSocket?offset_z=0", {
-			method: "POST",
-			headers: {
-				"accept": "application/json",
-			},
-		});
-		const data = await response.json();
-		console.log(data);
-    }
-    async function press() {
-		const response = await fetch("http://localhost:1442/moveUntilPressure?pressure=1000&wiggle_room=300", {
-			method: "POST",
-			headers: {
-				"accept": "application/json",
-			},
-		});
-		const data = await response.json();
-		console.log(data);
-	}
+    
 
 
 
@@ -68,26 +49,7 @@
 >
 	Select Tray
 </button>
-<button
-	on:click={() => (goToSocket())}
-	class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
->
-	Go to Socket
-</button>
-<button
-	on:click={() => (setSocket())}
-	class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
->
-	Set Socket
-</button>
 
-<button
-	on:click={() => (press())}
-	class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
->
-
-	Press
-</button>
 <!-- Modal Component -->
 <Modal bind:showModal>
 	<div class="p-6 bg-white rounded shadow-lg">

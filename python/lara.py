@@ -13,6 +13,9 @@ logging.getLogger('socketio').setLevel(logging.ERROR)
 logging.getLogger('engineio').setLevel(logging.ERROR)
 logging.basicConfig(level=logging.ERROR)
 
+
+
+
 class Lara:
 	def __init__(self):
 		self.robot =	Robot()
@@ -42,6 +45,8 @@ class Lara:
 		self.cartesian_slider_data =	{}
 		self.collided = False
 		self.started_movement_slider = False
+		self.current_linear_speed = None # Meters
+		self.current_rotation_speed = None # Rads
 
 	async def report_error(self, data):
 		print(f"Error: {data}")
@@ -90,11 +95,13 @@ class Lara:
 
 	async def send_hearbeat_response(self, *args):
 		"""Send a heartbeat response to request."""
-		print("Sending heartbeat.")
+		# print("Sending heartbeat.")
 		await self.sio.emit("heartbeat_response", True)
 	def deg2rad(self, deg):
 		return deg *	0.0174533
+	
 	async def set_translation_speed(self, speed):
+		self.current_linear_speed = speed
 		if speed > self.max_translation_speed:
 			speed = self.max_translation_speed
 			print("Speed	is too high, setting to 0.25")
@@ -111,8 +118,10 @@ class Lara:
 				logging.info(await response.text())
 		await self.sio.emit("linearveltrigger", {"data":	True})
 		await asyncio.sleep(0.5)
+		
 	
 	async def set_rotation_speed(self, speed):
+		self.current_rotation_speed = speed
 		if speed > self.max_rotation_speed:
 			speed = self.max_rotation_speed
 			print("Speed is too high, setting to 0.2617994")
@@ -128,6 +137,7 @@ class Lara:
 			) as response:
 				logging.info(await response.text())
 		await self.sio.emit("linearveltrigger", {"data":	True})
+		
 	def setRotSpeedDegSNoAsync(self, deg_s):
 		rad_s = deg_s * 0.0174533
 		print(f"Setting rotational speed to {rad_s} rad/s or {deg_s} deg/s")
@@ -199,34 +209,7 @@ class Lara:
 		)
 		steps.append(PoseCartesian(position=new_position, orientation=self.pose.orientation.to_euler(order="xyz")))
 		#move
-		self.robot.set_mode("Automatic")
-		linear_property = {
-			"speed": 0.05,
-			"acceleration": 0.001,
-			"blend_radius": 0.005,
-			"target_pose": [
-				[step.position.x, step.position.y, step.position.z, step.orientation.x, step.orientation.y, step.orientation.z] for step in steps
-			],
-			"current_joint_angles": self.robot.robot_status("jointAngles"),
-			"weaving": False,
-			"pattern": 1,
-			"amplitude": 0.006,
-			"amplitude_left": 0.0,
-			"amplitude_right": 0.0,
-			"frequency": 1.5,
-			"dwell_time_left": 0.0,
-			"dwell_time_right": 0.0,
-			"elevation": 0.0,
-			"azimuth": 0.0
-		}
-		self.robot.unpause()
-		self.robot.move_linear(**linear_property)
-		print("Movement done")
-		self.robot.stop()
-		print("Stopped")
-		self.robot.set_mode("Teach")
-		print("Teach mode set")
-		return self.robot.robot_status("jointAngles")
+		self.__move_to_steps(steps)
 	
 	def move_to_pose_from_retract(self, pose: Pose):
 		print(f"Moving to pose: {pose}")
@@ -251,10 +234,17 @@ class Lara:
 		#fourth step is the target position
 		steps.append(PoseCartesian(position=pose.position, orientation=pose.orientation.to_euler(order="xyz")))
 		#move
-		print(f"Moving to {steps}")
-		self.robot.set_mode("Automatic")
-		linear_property = {
-			"speed": 0.05,
+		self.__move_to_steps(steps)
+	
+	def __move_to_steps(self, steps):
+		if not steps:
+			raise ValueError("No steps provided")
+		error = False
+		print(f"Moving: {len(steps)} steps")
+		try: 
+			self.robot.set_mode("Automatic")
+			linear_property = {
+			"speed": 0.2,
 			"acceleration": 0.001,
 			"blend_radius": 0.005,
 			"target_pose": [
@@ -271,19 +261,26 @@ class Lara:
 			"dwell_time_right": 0.0,
 			"elevation": 0.0,
 			"azimuth": 0.0
-		}
-		self.robot.unpause()
-		self.robot.move_linear(**linear_property)
-		print("Movement done")
-		self.robot.stop()
-		print("Stopped")
-		self.robot.set_mode("Teach")
-		print("Teach mode set")
-		return self.robot.robot_status("jointAngles")
-
-
+			}
+			self.robot.unpause()
+			self.robot.move_linear(**linear_property)
+			print("Movement done")
+			self.robot.stop()
+			print("Stopped")
+		except Exception as e:
+			print(f"Error: {e}")
+			error = True
+		finally:
+			self.robot.set_mode("Teach")
+			if error:
+				raise ValueError("Error occurred during movement")
+			else:
+				print("Movement completed successfully")
 
 	def move_to_pose(self, pose: Pose):
+		'''
+		Moves to the target position by performing a retract along the normal then moving toward the target position
+		'''
 		print(f"Moving to pose: {pose}")
         # First step: use the current pose
 		steps = []
@@ -306,7 +303,7 @@ class Lara:
 		)
 
 		steps.append(PoseCartesian(position=new_position, orientation=self.pose.orientation.to_euler(order="xyz")))
-		#third step is target position + offset
+		# third step is target position + offset
 		rotation_matrix = R.from_quat([
 			pose.orientation.x,
 			pose.orientation.y,
@@ -320,40 +317,28 @@ class Lara:
 			pose.position.z + offset_global[2]
 		)
 		steps.append(PoseCartesian(position=new_position, orientation=pose.orientation.to_euler(order="xyz")))
-		#fourth step is the target position
+		# fourth step is the target position
 		steps.append(PoseCartesian(position=pose.position, orientation=pose.orientation.to_euler(order="xyz")))
-		#move
-		print(f"Moving to {steps}")
-		self.robot.set_mode("Automatic")
-		linear_property = {
-			"speed": 0.05,
-			"acceleration": 0.001,
-			"blend_radius": 0.005,
-			"target_pose": [
-				[step.position.x, step.position.y, step.position.z, step.orientation.x, step.orientation.y, step.orientation.z] for step in steps
-			],
-			"current_joint_angles": self.robot.robot_status("jointAngles"),
-			"weaving": False,
-			"pattern": 1,
-			"amplitude": 0.006,
-			"amplitude_left": 0.0,
-			"amplitude_right": 0.0,
-			"frequency": 1.5,
-			"dwell_time_left": 0.0,
-			"dwell_time_right": 0.0,
-			"elevation": 0.0,
-			"azimuth": 0.0
-		}
-		self.robot.unpause()
-		self.robot.move_linear(**linear_property)
-		print("Movement done")
-		self.robot.stop()
-		print("Stopped")
-		self.robot.set_mode("Teach")
-		print("Teach mode set")
-		return self.robot.robot_status("jointAngles")
+		# 
+		return self.__move_to_steps(steps)
+	
+	def move_to_pose_cartesian_from_current(self, pose: PoseCartesian):
+		'''
+		Moves to the target position by performing a retract along the normal then moving toward the target position
+		'''
+		print(f"Moving to pose: {pose}")
+		# First step: use the current pose
+		steps = []
+		steps.append(self.current_pose())
+		# Second step is the target position
+		steps.append(pose)
+		# 
+		return self.__move_to_steps(steps)
 	
 	def move_to_pose_tag_from_retract(self, pose: Pose):
+		'''
+		Moves to tag pose, to be used only with retract movement before hand
+		'''
 		# First step: use the current pose (retracted)
 		steps = []
 		steps.append(self.current_pose())
@@ -372,36 +357,7 @@ class Lara:
 			pose.position.z + offset_global[2]
 		)
 		steps.append(PoseCartesian(position=new_position, orientation=pose.orientation.to_euler(order="xyz")))
-		#move
-		print(f"Moving to {steps}")
-		self.robot.set_mode("Automatic")
-		linear_property = {
-			"speed": 0.03,
-			"acceleration": 0.001,
-			"blend_radius": 0.005,
-			"target_pose": [
-				[step.position.x, step.position.y, step.position.z, step.orientation.x, step.orientation.y, step.orientation.z] for step in steps
-			],
-			"current_joint_angles": self.robot.robot_status("jointAngles"),
-			"weaving": False,
-			"pattern": 1,
-			"amplitude": 0.006,
-			"amplitude_left": 0.0,
-			"amplitude_right": 0.0,
-			"frequency": 1.5,
-			"dwell_time_left": 0.0,
-			"dwell_time_right": 0.0,
-			"elevation": 0.0,
-			"azimuth": 0.0
-		}
-		self.robot.unpause()
-		self.robot.move_linear(**linear_property)
-		print("Movement done")
-		self.robot.stop()
-		print("Stopped")
-		self.robot.set_mode("Teach")
-		print("Teach mode set")
-		return self.robot.robot_status("jointAngles")
+		self.__move_to_steps(steps)
 
 	
 	def move_to_pose_tag(self, pose: Pose):
@@ -444,37 +400,7 @@ class Lara:
 			pose.position.z + offset_global[2]
 		)
 		steps.append(PoseCartesian(position=new_position, orientation=pose.orientation.to_euler(order="xyz")))
-		#move
-		print(f"Moving to {steps}")
-		self.robot.set_mode("Automatic")
-		linear_property = {
-			"speed": 0.03,
-			"acceleration": 0.001,
-			"blend_radius": 0.005,
-			"target_pose": [
-				[step.position.x, step.position.y, step.position.z, step.orientation.x, step.orientation.y, step.orientation.z] for step in steps
-			],
-			"current_joint_angles": self.robot.robot_status("jointAngles"),
-			"weaving": False,
-			"pattern": 1,
-			"amplitude": 0.006,
-			"amplitude_left": 0.0,
-			"amplitude_right": 0.0,
-			"frequency": 1.5,
-			"dwell_time_left": 0.0,
-			"dwell_time_right": 0.0,
-			"elevation": 0.0,
-			"azimuth": 0.0
-		}
-		self.robot.unpause()
-		self.robot.move_linear(**linear_property)
-		print("Movement done")
-		self.robot.stop()
-		print("Stopped")
-		self.robot.set_mode("Teach")
-		print("Teach mode set")
-		return self.robot.robot_status("jointAngles")
-	
+		self.__move_to_steps(steps)
 
 	def current_pose(self) -> PoseCartesian:
 		pose = self.robot.get_tcp_pose_quaternion() # [X,Y,Z,w,x,y,z] 

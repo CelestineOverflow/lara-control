@@ -26,9 +26,11 @@ json_data =	None
 udp_server = None
 reader_thread =	None
 json_data_consumed = False
+ip = "192.168.2.209"
 first_data_json	= None
 stop_event = threading.Event()
 lara : Lara	= None
+offset_x = 3.0
 
 logging.getLogger('lara').setLevel(logging.ERROR)
 
@@ -41,17 +43,37 @@ def	reader():
 			if not first_data_json:
 				first_data_json	= json_data
 			json_data_consumed = False
+			#
+			if lara is not None:
+				if lara.robot.program_status() == "PAUSED":
+					print("Robot is paused")
+				if lara.collided:
+					print("Robot collided")
+				if "force" in json_data:
+					force =	float(json_data["force"])
+					if force > threshold and lara is not None:
+						lara.robot.pause()
+						print("Force exceeded threshold")
+				# else:
+				# 	lara.robot.unpause()
+				# 	if lara.collided:
+				# 		print(f"collided unblock counter {unblock_collided_counter}")
+				# 		unblock_collided_counter += 1
+				# 		if unblock_collided_counter	> 10:
+				# 			await lara.reset_collision()
+				# 			unblock_collided_counter = 0
+
 		time.sleep(0.001)
 
 @asynccontextmanager
 async def lifespan(app:	FastAPI):
-	global serial_handler, udp_server, reader_thread, stop_event, lara
+	global serial_handler, udp_server, reader_thread, stop_event, lara, ip
 	serial_handler = Plunger("COM13", 115200)
 	serial_handler.start()
 	
 	# Start	the	UDP	server
 	udp_server = udp.UDPServer(
-		ip='localhost',
+		ip=ip,
 		port=8765,
 		buffer_size=1024,
 	)
@@ -100,38 +122,62 @@ is_paused =	False
 threshold =	10000.0
 force =	0.0
 
+active_websockets = []
+
+async def broadcast(message: dict):
+	global active_websockets
+	# Broadcast the message to all connected websockets
+	disconnected = []
+	for connection in active_websockets:
+		try:
+			await connection.send_json(message)
+		except Exception as e:
+			print("Broadcast error, removing websocket:", e)
+			disconnected.append(connection)
+	for connection in disconnected:
+		active_websockets.remove(connection)
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket:	WebSocket):
-	global lara, json_data,	threshold, is_paused, force, json_data_consumed, first_data_json
-	unblock_collided_counter = 0
+async def websocket_endpoint(websocket: WebSocket):
+	global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json
+	counter = 0
 	await websocket.accept()
-	#send the first	data json to the client
+	active_websockets.append(websocket)
+	
+	# Send the first data json to all clients
 	if first_data_json:
-		print("Sending first data json"	+ str(first_data_json))
-		await websocket.send_json(first_data_json)
-	while True:
-		if not json_data_consumed and json_data	is not None:
-			if lara.robot.program_status() == "PAUSED":
-				print("Robot is paused")
-				is_paused =	True
-			if "force" in json_data:
-				force =	float(json_data["force"])
-				if force > threshold and lara is not None:
-					lara.robot.pause()
-					is_paused =	True
-					unblock_collided_counter = 0
-				else:
-					lara.robot.unpause()
-					if lara.collided:
-						print(f"collided unblock counter {unblock_collided_counter}")
-						unblock_collided_counter += 1
-						if unblock_collided_counter	> 10:
-							await lara.reset_collision()
-							unblock_collided_counter = 0
-			await websocket.send_json(json_data)
+		print("Sending first data json: " + str(first_data_json))
+		await broadcast(first_data_json)
+	
+	try:
+		while True:
+			if not json_data_consumed and json_data is not None:
+				await broadcast(json_data)
+				await asyncio.sleep(0.01)
+				json_data_consumed = True
+				counter += 1
+				# Send test error periodically
+				if counter > 100:
+					print("Sending test error")
+					counter = 0
+					# await broadcast({
+					# 	"error": {
+					# 		"error_code": 0,
+					# 		"error_message": "Test error message"
+					# 	}
+					# })
+					await broadcast({
+						"warning": {
+							"warning_code": 0,
+							"warning_message": "Test warning message"
+						}
+					})
+					
 			await asyncio.sleep(0.01)
-			json_data_consumed = True
+	except Exception as e:
+		print("Websocket exception:", e)
+	finally:
+		active_websockets.remove(websocket)
 @app.post("/setPause")
 def	set_pause(pause: bool):
 	print("Setting pause to", pause)
@@ -172,7 +218,6 @@ def	set_sim_or_emulation(mode: str):
 	global lara
 	lara.robot.set_sim_real(mode)
 	return {"context": lara.robot.get_sim_or_real()}
-
 @app.get("/current_pump_pressure")
 def	get_current_pump_pressure():
 	global json_data
@@ -312,7 +357,17 @@ pose_correct = False
 @app.post("/moveToCell")
 def	move_to_cell(row: int =	0, col:	int	= 0):
 	global lara, socket_pose, json_data
-	lara.move_to_pose(tray.get_cell_robot_orientation(row, col))
+	error = lara.move_to_pose(tray.get_cell_robot_orientation(row, col))
+	if error:
+		return {"error": error}
+	return {"success": "Moved to cell"}
+
+@app.post("/tare")
+def	tare():
+	global serial_handler
+	serial_handler.write(f'{{"tare": 1}}')
+	return {"success": "Tare command sent"}
+
 
 @app.post("/retract")
 def	retract(distance = -0.15):
@@ -328,6 +383,12 @@ def	move_to_cell_retract(row: int =	0, col:	int	= 0):
 	global lara, socket_pose, json_data
 	lara.move_to_pose_from_retract(tray.get_cell_robot_orientation(row, col))
 
+
+@app.get("/getOffset")
+def	get_offset():
+	global offset_x
+	return {"offset_x": offset_x}
+
 @app.post("/moveToSocketRetract")
 async def move_to_socket_retract():
 	global lara, socket_pose, json_data
@@ -337,8 +398,8 @@ async def move_to_socket_retract():
 	loop = asyncio.get_running_loop()
 	def blocking_call():
 		return requests.post(
-			'http://localhost:1447/AlignToTag',
-			params={'offsetx': 2.0, 'offsety': 0},
+			'http://192.168.2.209:1447/AlignToTag',
+			params={'offsetx': offset_x, 'offsety': 0},
 			headers={'accept': 'application/json'}
 		)
 	response = await loop.run_in_executor(None, blocking_call)
@@ -348,7 +409,7 @@ async def move_to_socket_retract():
 
 @app.post("/moveToSocket")
 async def move_to_socket():
-	global lara, socket_pose, json_data
+	global lara, socket_pose, json_data, offset_x
 	lara.move_to_pose_tag(socket_pose)
 	await lara.set_translation_speed_mms(4)
 	await lara.set_rotation_speed_degs(1)
@@ -356,8 +417,8 @@ async def move_to_socket():
 
 	def blocking_call():
 		return requests.post(
-			'http://localhost:1447/AlignToTag',
-			params={'offsetx': 2.0, 'offsety': 0},
+			'http://192.168.2.209:1447/AlignToTag',
+			params={'offsetx': offset_x, 'offsety': 0},
 			headers={'accept': 'application/json'}
 		)
 
@@ -535,5 +596,6 @@ if __name__	== "__main__":
 	import uvicorn
 	import threading
 	import requests
-	uvicorn.run(app, host="localhost", port=1442)
+	
+	uvicorn.run(app, host=ip, port=1442)
 		

@@ -8,7 +8,7 @@ import requests
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-max_pressure = 15000.0
+max_pressure = 12000.0
 previous_pressure = 0.0 
 
 def serial_worker(port, baudrate, input_queue, output_queue, running_flag):
@@ -50,7 +50,7 @@ def serial_worker(port, baudrate, input_queue, output_queue, running_flag):
                             value = float(value)
                             if value > max_pressure and previous_pressure > max_pressure:
                                 logger.error(f"Pressure value too high: {value}")
-                                response = requests.request("POST", "http://localhost:1442/EmergencyStop")
+                                response = requests.request("POST", "http://192.168.2.209:1442/EmergencyStop")
                                 if response.status_code == 200:
                                     logger.info("Emergency stop request sent successfully")
                                 else:

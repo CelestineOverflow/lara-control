@@ -28,7 +28,7 @@
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        const response = await fetch('http://localhost:1446/offer', {
+        const response = await fetch('http://192.168.2.209:1446/offer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

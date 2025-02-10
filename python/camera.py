@@ -18,7 +18,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from contextlib	import asynccontextmanager
 from fastapi.middleware.cors import	CORSMiddleware
-from space import Euler, Vector3, Quaternion, Matrix4, Pose
+from space import Euler, Vector3, Quaternion, Matrix4, Pose, PoseCartesian
 from lara import Lara
 
 
@@ -29,11 +29,12 @@ lara = Lara()
 
 states = ["normal",	"square_detector", "tag_detector"]
 state =	states[2]
-current_camera_index = 0
+current_camera_index = 1
 change_camera_flag = False
 original_capture_resoltion = (3840,	2160)
 capture_resolution = (1920,	1080)
 frame_rate = 30
+ip = "192.168.2.209"
 # ---------------------	API	---------------------
 @asynccontextmanager
 async def lifespan(app:	FastAPI):	
@@ -97,9 +98,13 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 	z_final_height = (5 / 1000)
 	current_movement_vector	= Vector3(0, 0, 0)
 	current_rotation_vector	= Vector3(0, 0, 0)
+	start_height = None
+	last_height = False
 	# Thread control variables
 	jog_thread = None
 	stop_jog_event = threading.Event()
+	save_data = True
+
 
 
 
@@ -115,8 +120,6 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 			time_in_between = (current_time - start_time) * 1000  # Convert to milliseconds
 			# print(f"Time in between: {time_in_between:.2f} ms")
 			start_time = current_time
-			#1ms
-			time.sleep(0.001)
 	def	start_jog(velocity):
 		"""
 		Turns on jog and starts	the	background thread.
@@ -142,12 +145,9 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 		lara.robot.turn_off_jog()
 		if jog_thread and jog_thread.is_alive():
 			jog_thread.join()
-
+	poses = {}
 	while True:
 		if current_data:
-			print("Current data:", current_data)
-			#Current data: {0: {'x': -0.03317234153168576, 'y': -0.01310361036435018, 'z': 0.11802059384006146, 'camera': 1, 'quaternion': {'x': 0.06587277438240116, 'y': -0.0024032714382496096, 'z': 0.08833895905917911, 'w': 0.9939070530959624}}}
-			
 			try:
 				position = Vector3(
 				x=current_data[0]['x'],
@@ -190,18 +190,49 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 			T_delta	= T_robot_world.inverse() *	T_robot_world_desired
 			# 8) Extract the translation + rotation	from T_delta
 			delta_q, delta_t = T_delta.to_quaternion_translation()
+			# 9) Save pose data
+			if start_height is None:
+				start_height = (delta_t.z - z_final_height)
+				poses["start"] = {
+					"tag": detected_pose.to_dict(),
+					"robot": lara.current_pose().to_dict()
+				}
+				with open("poses.json", "r") as f:
+					last_data = f.read()
+					if last_data:
+						last_data = json.loads(last_data)
+						print(last_data)
+						# {'start': {'tag': {'position': [0.006143113998528555, 3.539078098373626e-05, 0.15121875647756386], 'orientation': [-0.1405898207550043, -0.00013636909131212118, 0.001801615349748799, 0.990066279541768]}, 'robot': {'position': [-0.15054610319842335, -0.5042284902953714, 0.21357617464788223], 'orientation': [-3.141576975550517, 2.6772147986742212e-05, -0.6197900824584184]}}, 'last': {'tag': {'position': [0.005648809324801668, 8.474977878136805e-05, 0.1359475291901317], 'orientation': [0.09830618284612178, -0.008742056127883127, 0.0021144961202943114, 0.9951155710645067]}, 'robot': {'position': [-0.15050097488787906, -0.5042355261944492, 0.19531571921122606], 'orientation': [-3.141581273516387, 3.0063411917469196e-05, -0.6196937818443564]}}}
+						#check distance against start in x y z of the current tag detection with the past start tag detection
+						last_tag_start = last_data["start"]["tag"]
+						x_error = abs(last_tag_start["position"][0] - detected_pose.position.x)
+						y_error = abs(last_tag_start["position"][1] - detected_pose.position.y)
+						z_error = abs(last_tag_start["position"][2] - detected_pose.position.z)
+						print(f"X error: {x_error * 1000:.2f} mm Y error: {y_error * 1000:.2f} mm Z error: {z_error * 1000:.2f} mm")
+						if x_error < 0.01 and y_error < 0.01 and z_error < 0.10:
+							#move arm to last position to speed up the process
+							print("Moving arm to known position")
+							save_data = False
+							last_arm_pose = last_data["last"]["robot"]
+							cartesianPose = PoseCartesian.from_dict(last_arm_pose)
+							lara.move_to_pose_cartesian_from_current(cartesianPose)
+			#check if last 10mm
+			else:
+				if abs(delta_t.z - z_final_height) < 0.01 and last_height == False:
+					print("Last 10mm")
+					poses[f"last"] = {
+						"tag": detected_pose.to_dict(),
+						"robot": lara.current_pose().to_dict()
+					}
+					last_height = True
+
+
+			
+
+			# print(f"Delta translation: {(delta_t.z - z_final_height) * 1000:.2f} mm")
 			# rotation
 			rot_z =	delta_q.to_euler().z
 			allowed_error_rot =	0.5
-
-			# distance_from_final_z_height = abs(delta_t.z) - z_final_height
-			# if distance_from_final_z_height > 10 and distance_from_final_z_height < 50 and not (current_trans_speed == 2):
-			# 	print("Setting translation speed to 2")
-			# 	lara.setTranslationSpeedMMs(2)
-			# if distance_from_final_z_height < 10 and not (current_trans_speed == 1):
-			# 	print("Setting translation speed to 1")
-			# 	lara.setTranslationSpeedMMs(1)
-				
 			if abs(delta_t.z) >	((50 / 1000) + z_final_height):
 				allowed_error_rot =	0.2
 			elif abs(delta_t.z)	> ((30 / 1000) + z_final_height):
@@ -284,6 +315,10 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 					start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
 		time.sleep(0.01)
 	stop_jog()
+	# Save the poses to a json file
+	if save_data:
+		with open("poses.json", "w") as f:
+			json.dump(poses, f, indent=4)
 	return {"status": "ok"}
 
 
@@ -382,7 +417,7 @@ camera_presets = {
 		'calibration_path':	'computer_vision/calibration_data.json',
 	},
 	2: {
-		'rotate': True,
+		'rotate': False,
 		'calibration_path':	'computer_vision/calibration_data_close_up.json',
 	}
 }
@@ -680,131 +715,13 @@ def	udp_server():
 			print(f"UDP	server error: {e}")
 			break
 
-def	fit_polynomial_for_offsets(offsets):
-	z_vals = []
-	off_x =	[]
-	off_y =	[]
-
-	for	data in offsets:
-		z_vals.append(data["raw_z"])
-		offset_x_val = data["ideal_x"] - data["raw_x"]
-		offset_y_val = data["ideal_y"] - data["raw_y"]
-		off_x.append(offset_x_val)
-		off_y.append(offset_y_val)
-
-	z_vals = np.array(z_vals, dtype=float)
-	off_x =	np.array(off_x,	dtype=float)
-	off_y =	np.array(off_y,	dtype=float)
-
-	popt_x,	_ =	curve_fit(polynomial_model,	z_vals,	off_x)
-	popt_y,	_ =	curve_fit(polynomial_model,	z_vals,	off_y)
-
-	return popt_x.tolist(),	popt_y.tolist()
-
-def	save_camera_fits(cam_index,	coeffs_x, coeffs_y):
-	data = {
-		"coeffs_x":	coeffs_x,
-		"coeffs_y":	coeffs_y
-	}
-	fname =	f"camera_{cam_index}_offsets.json"
-	with open(fname, 'w') as f:
-		json.dump(data,	f, indent=4)
-	print(f"Saved polynomial offset	fits to {fname}")
-
-def	load_camera_fits(cam_index):
-	fname =	f"camera_{cam_index}_offsets.json"
-	try:
-		with open(fname, 'r') as f:
-			data = json.load(f)
-			return data["coeffs_x"], data["coeffs_y"]
-	except:
-		return None, None
-
-def	calibration_routine(cap, rotate_flag, current_camera_index):
-	import math
-	offsets_data = []
-	measure_count =	0
-	assume_center_is_zero =	True  # or tweak if needed
-
-	while True:
-		ret, frame = cap.read()
-		if not ret:
-			print("Camera feed is messed up during calibration.	Exiting	calibration.")
-			break
-
-		if rotate_flag:
-			frame =	cv2.rotate(frame, cv2.ROTATE_180)
-
-		displayed_frame, detections	= detector_superimpose(frame, at_detector, 0.01, current_camera_index)
-		cv2.putText(
-			displayed_frame,
-			"CALIBRATION MODE: Press 'Space' to record data, 'x' to finish",
-			(20, 50),
-			cv2.FONT_HERSHEY_SIMPLEX,
-			1.0,
-			(255, 255, 0),
-			2
-		)
-
-		# cv2.imshow("Calibration",	displayed_frame)
-		key	= cv2.waitKey(1) & 0xFF
-
-		if key == ord('x'):
-			if len(offsets_data) < 2:
-				print("Not enough data to do a polynomial fit. Bailing out.")
-			else:
-				coeffs_x, coeffs_y = fit_polynomial_for_offsets(offsets_data)
-				camera_fits[current_camera_index] =	{
-					"coeffs_x":	coeffs_x,
-					"coeffs_y":	coeffs_y
-				}
-				save_camera_fits(current_camera_index, coeffs_x, coeffs_y)
-			print("Exiting calibration mode.")
-			cv2.destroyWindow("Calibration")
-			return
-
-		elif key == ord(' '):
-			if not detections:
-				print("No tag detected—can't record. Try again.")
-				continue
-
-			tag_id = list(detections.keys())[0]
-			pose_data =	detections[tag_id]
-			measure_count += 1
-
-			raw_x =	pose_data["raw_x"]
-			raw_y =	pose_data["raw_y"]
-			raw_z =	pose_data["raw_z"]
-
-			ideal_x	= 0.0
-			ideal_y	= 0.0
-
-			offsets_data.append({
-				"measurement_index": measure_count,
-				"tag_id": tag_id,
-				"raw_x": raw_x,
-				"raw_y": raw_y,
-				"raw_z": raw_z,
-				"ideal_x": ideal_x,
-				"ideal_y": ideal_y
-			})
-
-			print(f"Recorded measurement {measure_count}: "
-				  f"raw=({raw_x:.4f}, {raw_y:.4f}, {raw_z:.4f}), ideal=(0,0)")
-
 def	initialize_camera(index):
 	preset = camera_presets.get(index, {})
 	load_calibration_file(preset.get('calibration_path', ''))
 	rotate = preset.get('rotate', False)
-	cx,	cy = load_camera_fits(index)
-	if cx and cy:
-		camera_fits[index] = {"coeffs_x": cx, "coeffs_y": cy}
-		print(f"Loaded polynomial offset fits for camera {index}: X={cx}, Y={cy}")
 	return rotate
 
-###
-###	CHANGES	FOR	RETRY: A helper	function to open a camera with retry
-###
+
 def	open_camera_with_retry(camera_index, max_retries=-1, delay_seconds=5):
 	"""
 	Tries to open the specified	camera index, and if it fails,
@@ -831,7 +748,7 @@ def	open_camera_with_retry(camera_index, max_retries=-1, delay_seconds=5):
 
 
 def	camera_loop():
-	global current_camera_index, change_camera_flag, state
+	global current_camera_index, change_camera_flag, state, ip
 	"""
 	This function runs in a	background thread.
 	It continuously	grabs frames from the camera
@@ -842,7 +759,7 @@ def	camera_loop():
 
 	# Start	your MJPEG server and streaming
 	stream = Stream("my_camera", size=(1280, 720), quality=50, fps=frame_rate)
-	server = MjpegServer("localhost", 1692)
+	server = MjpegServer(ip, 1692)
 	server.add_stream(stream)
 	server.start()
 
@@ -912,6 +829,7 @@ def	camera_loop():
 				cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_resolution[1])
 				cap.set(cv2.CAP_PROP_FPS, frame_rate)
 				print(f"Switched to camera {new_camera}")
+				change_camera_flag = False
 			
 			key	= cv2.waitKey(1) & 0xFF
 
@@ -936,13 +854,6 @@ def	camera_loop():
 
 			stream.set_frame(resized)
 
-		else:
-			# Run calibration routine until	user exits
-			calibration_routine(
-				cap, rotate_camera,	camera_indices[current_camera_index]
-			)
-			is_calibrating = False
-
 	# When we exit the while loop or get a stop	signal,	shut down
 	print("Exiting camera_loop()...")
 	server.stop()
@@ -955,5 +866,5 @@ def	camera_loop():
 if __name__	== "__main__":
 	import uvicorn
 	import threading
-	uvicorn.run(app, host="localhost", port=1447)
+	uvicorn.run(app, host="192.168.2.209", port=1447)
 	

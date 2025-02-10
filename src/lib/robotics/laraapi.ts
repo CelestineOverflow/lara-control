@@ -24,6 +24,7 @@ export function setupSocket() {
         await fetch_joints_angle();
         await getTray();
         await getTargetPose();
+        await getOffsetX();
     });
 
     socket.on("heartbeat_check", () => {
@@ -214,7 +215,7 @@ export function stopMovement() {
 
 export async function setTray() {
     try {
-        const response = await fetch("http://localhost:1442/setTray", {
+        const response = await fetch("http://192.168.2.209:1442/setTray", {
             method: "POST",
             headers: {
                 Accept: "application/json",
@@ -243,7 +244,7 @@ export async function setTray() {
 
 export async function getTray() {
     try {
-        const response = await fetch("http://localhost:1442/getTray", {
+        const response = await fetch("http://192.168.2.209:1442/getTray", {
             method: "GET",
             headers: {
                 Accept: "application/json",
@@ -268,10 +269,96 @@ export async function getTray() {
     }
 }
 
+let offsetX = 2.5;
+
+export async function getOffsetX() {
+    try {
+        const response = await fetch("http://192.168.2.209:1442/getOffset", {
+            method: "GET",
+            headers: {
+                Accept: "application/json",
+            },
+        });
+        const data = await response.json();
+        offsetX = data.offset_x;
+    }
+    catch (error) {
+        console.error("Error:", error);
+    }
+    
+}
+
+export async function goToSocket() {
+    const response = await fetch("http://192.168.2.209:1442/moveToSocket?offset_z=0", {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+        },
+    });
+    const data = await response.json();
+    console.log(data);
+}
+export async function press(force: number) {
+    //force between 0 and 10000
+    if (force > 10000) {
+        console.error("Force too high, setting to max force.");
+        force = 10000;
+    }
+    
+    const response = await fetch(`http://192.168.2.209:1442/moveUntilPressure?pressure=${force}&wiggle_room=300`, {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+        },
+    });
+    const data = await response.json();
+    console.log(data);
+}
+
+export async function togglePump(bool: boolean) {
+    try {
+        const response = await fetch(`http://192.168.2.209:1442/togglePump?boolean=${bool}`, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("Toggle pump response:", data);
+    } catch (error) {
+        console.error("Error toggling pump:", error);
+    }
+}
+
+
+export async function tare() {
+    try {
+        const response = await fetch(`http://192.168.2.209:1442/tare`, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("Toggle pump response:", data);
+    } catch (error) {
+        console.error("Error toggling pump:", error);
+    }
+}
 
 export async function setSocket() {
     try {
-        const response = await fetch("http://localhost:1442/setSocket", {
+        const response = await fetch("http://192.168.2.209:1442/setSocket", {
             method: "POST",
             headers: {
                 Accept: "application/json",
@@ -298,7 +385,7 @@ export async function setSocket() {
 
 export async function getTargetPose() {
     try {
-        const response = await fetch("http://localhost:1442/getSocket", {
+        const response = await fetch("http://192.168.2.209:1442/getSocket", {
             method: "GET",
             headers: {
                 Accept: "application/json",
@@ -322,7 +409,7 @@ export async function setBrightness(newBrightness: number) {
         console.error("Not connected to the robot.");
         return;
     }
-    fetch(`http://localhost:1442/setBrightness?newBrightness=${newBrightness}`, {
+    fetch(`http://192.168.2.209:1442/setBrightness?newBrightness=${newBrightness}`, {
         method: "POST",
         headers: {
             "accept": "application/json",
@@ -338,7 +425,7 @@ export async function setLeds() {
         return;
     }
 
-    fetch(`http://localhost:1442/setLeds`, {
+    fetch(`http://192.168.2.209:1442/setLeds`, {
         method: "POST",
         headers: {
             "accept": "application/json",
@@ -353,7 +440,7 @@ export async function setHSL(hue: number, sat: number, light: number) {
         console.error("Not connected to the robot.");
         return;
     }
-    fetch(`http://localhost:1442/setHSL?hue=${hue}&sat=${sat}&light=${light}`, {
+    fetch(`http://192.168.2.209:1442/setHSL?hue=${hue}&sat=${sat}&light=${light}`, {
         method: "POST",
         headers: {
             "accept": "application/json",
@@ -369,7 +456,7 @@ export async function setHeater(newHeat: number) {
         console.error("Not connected to the robot.");
         return;
     }
-    fetch(`http://localhost:1442/setHeater?newHeat=${newHeat}`, {
+    fetch(`http://192.168.2.209:1442/setHeater?newHeat=${newHeat}`, {
         method: "POST",
         headers: {
             "accept": "application/json",
@@ -424,7 +511,7 @@ export async function setRotationalSpeed(arg0: number): Promise<void> {
 }
 
 // curl -X 'POST' \
-//   'http://localhost:1442/setPause?pause=true' \
+//   'http://192.168.2.209:1442/setPause?pause=true' \
 //   -H 'accept: application/json' \
 //   -d ''
 
@@ -432,7 +519,7 @@ export async function setPause(): Promise<void> {
     const pause = !get(isPaused);
     console.log("Pause:", pause);
     
-    fetch(`http://localhost:1442/setPause?pause=${pause}`, {
+    fetch(`http://192.168.2.209:1442/setPause?pause=${pause}`, {
         method: "POST",
         headers: {
             Accept: "application/json",
@@ -488,7 +575,7 @@ export let current_state_index = writable(0);
 
 export async function set_state(state: string): Promise<void> {
     try {
-        const response = await fetch(`http://localhost:1447/set_state/${state}`, {
+        const response = await fetch(`http://192.168.2.209:1447/set_state/${state}`, {
             method: "POST",
             headers: {
                 "accept": "application/json",
@@ -505,7 +592,7 @@ export async function set_state(state: string): Promise<void> {
 
 export async function set_camera(index: number): Promise<void> {
     try {
-        const response = await fetch(`http://localhost:1447/set_camera/${index}`, {
+        const response = await fetch(`http://192.168.2.209:1447/set_camera/${index}`, {
             method: "POST",
             headers: {
                 "accept": "application/json",

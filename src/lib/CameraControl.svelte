@@ -6,7 +6,7 @@
 
     async function set_state(state: string): Promise<void> {
         try {
-            const response = await fetch(`http://localhost:1447/set_state/${state}`, {
+            const response = await fetch(`http://192.168.2.209:1447/set_state/${state}`, {
                 method: "POST",
                 headers: {
                     "accept": "application/json",
@@ -22,7 +22,7 @@
 
     async function set_camera(index: number): Promise<void> {
         try {
-            const response = await fetch(`http://localhost:1447/set_camera/${index}`, {
+            const response = await fetch(`http://192.168.2.209:1447/set_camera/${index}`, {
                 method: "POST",
                 headers: {
                     "accept": "application/json",
@@ -38,7 +38,7 @@
 
     async function get_state(): Promise<void> {
         try {
-            const response = await fetch(`http://localhost:1447/get_state`, {
+            const response = await fetch(`http://192.168.2.209:1447/get_state`, {
                 method: "GET",
                 headers: {
                     "accept": "application/json",

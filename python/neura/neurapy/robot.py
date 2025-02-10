@@ -185,7 +185,8 @@ class Robot:
             "get_current_cartesian_pose",
             "get_tcp_pose_quaternion",
             "quaternion_to_rpy",
-            "program_status"
+            "program_status",
+            "compute_inverse_kinematics"
         ]
         self.logger = neurapy_logger
         

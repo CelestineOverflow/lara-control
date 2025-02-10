@@ -97,7 +97,7 @@
         rotational_speed = arg0 / 1000 * max_rotation_speed;
         setRotationalSpeed(rotational_speed);
     }
-    let linear_speed = 0.0;
+    let linear_speed = 0.01;
 
     function setTransSpeed(arg0: number){
         //max 250mm/s
@@ -117,22 +117,10 @@
         <h3 class="col-span-3">Translation (X, Y, Z) Speed: {linear_speed * 1000} mm/s</h3>
         <input
             type="range"
-            min="0"
-            max="1000"
-            step="1"
-            on:input={e => setTransSpeed(parseInt(e.target.value))}
-            class="slider"
-        />
-    </div>
-
-    <div class="grid grid-cols-2 gap-3 bg-indigo-600 bg-opacity-20 rounded">
-        <h3 class="col-span-3">Custom C {customZAngleDeg}°</h3>
-        <input
-            type="range"
-            min="0"
-            max="180"
-            step="1"
-            on:input={e => customZAngleDeg = parseInt(e.target.value)}
+            min="0.1"
+            max="100"
+            step="0.1"
+            on:input={e => setTransSpeed(parseFloat(e.target.value))}
             class="slider"
         />
     </div>

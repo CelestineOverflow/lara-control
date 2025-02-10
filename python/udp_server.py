@@ -3,7 +3,7 @@ import json
 import select
 
 class UDPServer:
-    def __init__(self, ip='localhost', port=8765, buffer_size=1024):
+    def __init__(self, ip='192.168.2.209', port=8765, buffer_size=1024):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.server_socket.bind((ip, port))
         self.sock = self.server_socket
@@ -29,7 +29,7 @@ class UDPServer:
 
 if __name__ == "__main__":
     udp_server = UDPServer(
-        ip='localhost',
+        ip='192.168.2.209',
         port=8765,
         buffer_size=1024
     )

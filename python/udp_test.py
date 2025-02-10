@@ -12,7 +12,7 @@ async def handle_message(websocket):
         message_queue.put(message)  # Put the message in the queue
 
 async def main():
-    async with serve(handle_message, "localhost", 8765):
+    async with serve(handle_message, "192.168.2.209", 8765):
         await asyncio.get_running_loop().create_future()  # run forever
 
 def start_server():

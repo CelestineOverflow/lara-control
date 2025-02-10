@@ -8,7 +8,7 @@
       return;
     }
 
-    fetch(`http://localhost:1442/setLeds`, {
+    fetch(`http://192.168.2.209:1442/setLeds`, {
       method: "POST",
       headers: {
         accept: "application/json",

@@ -8,7 +8,7 @@
     import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
     import { moveCartesian, setupSocket } from "$lib/robotics/laraapi";
     let ws: WebSocket;
-    let ws_url = "ws://localhost:4245";
+    let ws_url = "ws://192.168.2.209:4245";
     let incoming_data: any;
     let update_from_server = true;
     //Enviroment Variable

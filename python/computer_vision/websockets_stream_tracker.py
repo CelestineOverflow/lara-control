@@ -128,7 +128,7 @@ async def handle_client(websocket, path):
             break
 def start_server():
     asyncio.set_event_loop(asyncio.new_event_loop())
-    start_server = websockets.serve(handle_client, "localhost", 6969)
+    start_server = websockets.serve(handle_client, "192.168.2.209", 6969)
     asyncio.get_event_loop().run_until_complete(start_server)
     asyncio.get_event_loop().run_forever()
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
 
     print("Starting server")
     stream = Stream("my_camera", size=(640, 480), quality=50, fps=30)
-    server = MjpegServer("localhost", args.port)
+    server = MjpegServer("192.168.2.209", args.port)
     server.add_stream(stream)
     server.start()
 

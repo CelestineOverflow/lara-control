@@ -270,6 +270,19 @@ class PoseCartesian():
         self.position = position
         self.orientation = orientation
 
+    def to_dict(self) -> dict:
+        return {
+            "position": self.position.to_list(),
+            "orientation": self.orientation.to_list()
+        }
+    @staticmethod
+    def from_dict(data) -> 'PoseCartesian':
+        return PoseCartesian(
+            position=Vector3(*data['position']),
+            orientation=Euler(*data['orientation'])
+        )
+    
+
 class Matrix4:
    """
    4x4 homogeneous transformation matrix.
