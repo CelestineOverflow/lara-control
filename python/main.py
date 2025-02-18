@@ -16,7 +16,8 @@ from scipy.spatial.transform import	Rotation as R
 import json
 import udp_server as udp
 import threading
-import time	
+import time
+import queue
 import logging
 
 # --- Global variables ---
@@ -30,13 +31,24 @@ ip = "192.168.2.209"
 first_data_json	= None
 stop_event = threading.Event()
 lara : Lara	= None
-offset_x = 3.0
-
+offset_x = 3.4
 logging.getLogger('lara').setLevel(logging.ERROR)
+
+error_queue = queue.Queue()
+warning_queue = queue.Queue()
+
+
+def emit_error(error_code: int, error_message: str):
+	error_queue.put((error_code, error_message))
+
+def emit_warning(warning_code: int, warning_message: str):
+	warning_queue.put((warning_code, warning_message))
 
 def	reader():
 	global serial_handler, json_data, json_data_consumed, first_data_json
 	serial_handler.write('{"connected":	1}')
+	flag_error_sent = False
+	flag_warning_sent = False
 	while not stop_event.is_set():
 		if serial_handler and not serial_handler.output.empty():
 			json_data =	serial_handler.output.get()
@@ -51,9 +63,17 @@ def	reader():
 					print("Robot collided")
 				if "force" in json_data:
 					force =	float(json_data["force"])
-					if force > threshold and lara is not None:
+					if force > threshold and lara is not None and not flag_error_sent:
+						lara.robot.power('off')
+						emit_error(1, f"Force exceeded {threshold}, robot powered off")
+						flag_error_sent = True
+					if force > threshold - (threshold * 0.1) and lara is not None and not flag_warning_sent:
 						lara.robot.pause()
-						print("Force exceeded threshold")
+						emit_warning(1, f"Force near threshold {threshold}")
+						flag_warning_sent = True
+					else:
+						flag_error_sent = False
+						flag_warning_sent = False
 				# else:
 				# 	lara.robot.unpause()
 				# 	if lara.collided:
@@ -71,12 +91,12 @@ async def lifespan(app:	FastAPI):
 	serial_handler = Plunger("COM13", 115200)
 	serial_handler.start()
 	
-	# Start	the	UDP	server
-	udp_server = udp.UDPServer(
-		ip=ip,
-		port=8765,
-		buffer_size=1024,
-	)
+	# # Start	the	UDP	server
+	# udp_server = udp.UDPServer(
+	# 	ip=ip,
+	# 	port=8765,
+	# 	buffer_size=1024,
+	# )
 
 	#connect to the	robot
 	lara = Lara()
@@ -156,23 +176,23 @@ async def websocket_endpoint(websocket: WebSocket):
 				await asyncio.sleep(0.01)
 				json_data_consumed = True
 				counter += 1
-				# Send test error periodically
-				if counter > 100:
-					print("Sending test error")
-					counter = 0
-					# await broadcast({
-					# 	"error": {
-					# 		"error_code": 0,
-					# 		"error_message": "Test error message"
-					# 	}
-					# })
+			if not error_queue.empty():
+					error = error_queue.get()
 					await broadcast({
-						"warning": {
-							"warning_code": 0,
-							"warning_message": "Test warning message"
+						"error": {
+							"error_code": error[0],
+							"error_message": error[1]
 						}
 					})
-					
+			if not warning_queue.empty():
+				warning = warning_queue.get()
+				await broadcast({
+					"warning": {
+						"warning_code": warning[0],
+						"warning_message": warning[1]
+					}
+				})
+			
 			await asyncio.sleep(0.01)
 	except Exception as e:
 		print("Websocket exception:", e)
@@ -406,6 +426,9 @@ async def move_to_socket_retract():
 	print(f"Response from AlignToTag: {response.text}")
 	#set the current pose as the socket pose
 	set_socket()
+
+
+
 
 @app.post("/moveToSocket")
 async def move_to_socket():

@@ -29,7 +29,7 @@ lara = Lara()
 
 states = ["normal",	"square_detector", "tag_detector"]
 state =	states[2]
-current_camera_index = 1
+current_camera_index = 0
 change_camera_flag = False
 original_capture_resoltion = (3840,	2160)
 capture_resolution = (1920,	1080)
@@ -58,7 +58,6 @@ async def lifespan(app:	FastAPI):
 		print("Stopping the camera thread")
 		stop_camera_thread = True
 		camera_thread.join()
-		await lara.disconnect_socket()
 		print("Disconnected from the robot")
 
 
@@ -84,13 +83,8 @@ def	set_state(new_state: str):
 current_data = None
 
 @app.post("/AlignToTag")
-def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
+async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 	global lara, current_data
-	# current_trans_speed = 4
-	# current_rot_speed = 1
-	# lara.setTranslationSpeedMMsNoAsync(current_trans_speed)
-	# lara.setRotSpeedDegSNoAsync(current_rot_speed)
-	#convert the offset	to meters with a max value of 10mm in each direction
 	if offsetx > 10 or offsetx < -10 or offsety	> 10 or offsety	< -10:
 		return {"error": "Offset values	must be between	-10	and	10 mm"}
 	offsetx	/= 1000
@@ -219,16 +213,12 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 			#check if last 10mm
 			else:
 				if abs(delta_t.z - z_final_height) < 0.01 and last_height == False:
-					print("Last 10mm")
+					print("saving last position, last 10mm")
 					poses[f"last"] = {
 						"tag": detected_pose.to_dict(),
 						"robot": lara.current_pose().to_dict()
 					}
 					last_height = True
-
-
-			
-
 			# print(f"Delta translation: {(delta_t.z - z_final_height) * 1000:.2f} mm")
 			# rotation
 			rot_z =	delta_q.to_euler().z
@@ -238,7 +228,7 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 			elif abs(delta_t.z)	> ((30 / 1000) + z_final_height):
 				allowed_error_rot =	0.1
 			else:
-				allowed_error_rot =	0.01		
+				allowed_error_rot =	0.01
 			if not (rot_z <	allowed_error_rot and rot_z	> -allowed_error_rot):
 				current_movement_vector.x =	0
 				current_movement_vector.y =	0
@@ -285,25 +275,22 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 				allowed_error_xy = 3 / 1000
 			elif abs(delta_t.z)	> ((5 /	1000) +	z_final_height):
 				allowed_error_xy = 1 / 1000
+			elif abs(delta_t.z)	> ((1 /	1000) +	z_final_height):
+				allowed_error_xy = 0.1 / 1000
 			else: 
-				allowed_error_xy = 0.1 / 1000			
+				allowed_error_xy = 0.05 / 1000
 			if not (abs(delta_t.x) < allowed_error_xy and abs(delta_t.y) < allowed_error_xy):
+				#we dont wanna move z or rotate if x and y are not aligned
 				current_movement_vector.z =	0
 				current_rotation_vector.x =	0
 				current_rotation_vector.y =	0
 				current_rotation_vector.z =	0
 				start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
-				if allowed_error_xy	== 0.1 / 1000:
-					#we should not use threading here, fine tuning
-
-					lara.robot.turn_on_jog(
-						jog_velocity=[0, 0, 0, 0, 0, 0],
-						jog_type='Cartesian'
-					)
-					lara.robot.jog(set_jogging_external_flag = 1)
 				continue
 			else:
 				if abs(delta_t.z) <	z_final_height:
+					stop_jog()
+					print("Finished aligning to tag")
 					break
 				else:
 					current_movement_vector.x =	0
@@ -313,9 +300,13 @@ def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 					current_rotation_vector.y =	0
 					current_rotation_vector.z =	0
 					start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
+			if abs(delta_t.z) <	z_final_height:
+				stop_jog()
+				print("Finished aligning to tag")
+				break
+		print("finish loop")
 		time.sleep(0.01)
-	stop_jog()
-	# Save the poses to a json file
+	print("saving data")
 	if save_data:
 		with open("poses.json", "w") as f:
 			json.dump(poses, f, indent=4)
@@ -412,7 +403,7 @@ def	square_superimpose(frame):
 
 # -------------------- Camera Presets --------------------
 camera_presets = {
-	1: {
+	0: {
 		'rotate': False,
 		'calibration_path':	'computer_vision/calibration_data.json',
 	},
@@ -484,8 +475,8 @@ def	getAvailableCameras():
 
 at_detector	= Detector(
 	families="tag36h11",
-	nthreads=1,
-	quad_decimate=4.0,
+	nthreads=4,
+	quad_decimate=1.0,
 	quad_sigma=0.0,
 	refine_edges=1,
 	decode_sharpening=1,
