@@ -78,6 +78,16 @@ class Vector2:
        return [self.x, self.y]
    def __str__(self):
        return f"({self.x}, {self.y})"
+   
+   def rotate(self, angle: float) -> 'Vector2':
+        """
+            Rotate the vector by the given angle (in radians).
+        """
+        cosA = np.cos(angle)
+        sinA = np.sin(angle)
+        x = self.x * cosA - self.y * sinA
+        y = self.x * sinA + self.y * cosA
+        return Vector2(x, y)   
 class Euler:
     def __init__(self, x: float, y: float, z: float):
         # Angles in radians
@@ -339,6 +349,12 @@ class Matrix4:
        and returns the corresponding Matrix4.
        """
        return Matrix4.from_quaternion_translation(pose.orientation, pose.position)
+   @staticmethod
+   def from_quaternion(q: 'Quaternion') -> 'Matrix4':
+         """
+         Construct a 4x4 homogeneous transform from a quaternion.
+         """
+         return Matrix4.from_quaternion_translation(q, Vector3(0.0, 0.0, 0.0))
    def to_quaternion_translation(self) -> Tuple[Quaternion, Vector3]:
        """
        Extract the rotation (as a Quaternion) and translation (as Vector3)
@@ -367,6 +383,8 @@ class Matrix4:
        mat = np.array(self.data, dtype=np.float64)
        inv_mat = np.linalg.inv(mat)
        return Matrix4(inv_mat.tolist())
+   
+
    def __mul__(self, other):
        """
        Overload the * operator for:
@@ -421,3 +439,6 @@ class Pose():
     
     def to_Cartesian(self) -> PoseCartesian:
         return PoseCartesian(self.position, self.orientation.to_euler())
+    
+    def __str__(self):
+        return f"Position: {self.position}, Orientation: {self.orientation}"

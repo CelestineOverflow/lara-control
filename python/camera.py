@@ -18,7 +18,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from contextlib	import asynccontextmanager
 from fastapi.middleware.cors import	CORSMiddleware
-from space import Euler, Vector3, Quaternion, Matrix4, Pose, PoseCartesian
+from space import Euler, Vector3, Quaternion, Matrix4, Pose, PoseCartesian, Vector2
 from lara import Lara
 
 
@@ -170,7 +170,8 @@ async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 				orientation=Quaternion(0, 0, 0, 1)
 			)
 			# 4) Current robot pose	in the world
-			lara_global_pose = lara.pose
+			lara_global_pose = lara.current_pose_raw()
+			print(f"Current robot pose: {lara_global_pose}")
 			# ---- Convert to 4x4 transforms ----
 			T_robot_world	= Matrix4.from_pose(lara_global_pose)	 # Robot in world
 			T_camera_robot	= Matrix4.from_pose(offset_camera_pose)	  # Camera in robot
@@ -222,11 +223,11 @@ async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 			# print(f"Delta translation: {(delta_t.z - z_final_height) * 1000:.2f} mm")
 			# rotation
 			rot_z =	delta_q.to_euler().z
-			allowed_error_rot =	0.5
+			allowed_error_rot =	0.2
 			if abs(delta_t.z) >	((50 / 1000) + z_final_height):
-				allowed_error_rot =	0.2
-			elif abs(delta_t.z)	> ((30 / 1000) + z_final_height):
 				allowed_error_rot =	0.1
+			elif abs(delta_t.z)	> ((30 / 1000) + z_final_height):
+				allowed_error_rot =	0.05
 			else:
 				allowed_error_rot =	0.01
 			if not (rot_z <	allowed_error_rot and rot_z	> -allowed_error_rot):
@@ -475,7 +476,7 @@ def	getAvailableCameras():
 
 at_detector	= Detector(
 	families="tag36h11",
-	nthreads=4,
+	nthreads=8,
 	quad_decimate=1.0,
 	quad_sigma=0.0,
 	refine_edges=1,

@@ -1,5 +1,5 @@
 import URDFLoader, { type URDFRobot } from "urdf-loader";
-import { Scene, LoadingManager, Quaternion, Vector3,SkinnedMesh,Skeleton,MeshPhongMaterial,CylinderGeometry,SkeletonHelper,Bone, PerspectiveCamera, BoxGeometry, MeshBasicMaterial, Mesh, CameraHelper} from "three";
+import { Scene, LoadingManager, Quaternion, Vector3,SkinnedMesh,Skeleton,MeshPhongMaterial,CylinderGeometry,SkeletonHelper,Bone, PerspectiveCamera, BoxGeometry, MeshBasicMaterial, Mesh, CameraHelper, AxesHelper} from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { CCDIKSolver } from "three/examples/jsm/animation/CCDIKSolver.js";
 import { toRad } from "./utils";
@@ -96,6 +96,11 @@ export class Lara {
                     this.camera.position.set(0, -0.27, -0.02);
                     //rotate camera to look straight down
                     this.camera.rotation.set(toRad(-90), 0, 0);
+                    //add axis helper to the end effector for visual aid
+                    const axesHelper = new AxesHelper( .5 )
+                    //move the axis helper to the end effector
+                    axesHelper.position.set(0, -.2, 0);
+                    lastMesh.add(axesHelper);
                 });
             
             }
