@@ -32,9 +32,12 @@ state =	states[2]
 current_camera_index = 0
 change_camera_flag = False
 original_capture_resoltion = (3840,	2160)
-capture_resolution = (1920,	1080)
 frame_rate = 30
 ip = "192.168.2.209"
+close_up_resolution = (1280, 720)
+far_resolution = (1920, 1080)
+current_setting_resolution = far_resolution
+
 # ---------------------	API	---------------------
 @asynccontextmanager
 async def lifespan(app:	FastAPI):	
@@ -89,7 +92,7 @@ async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 		return {"error": "Offset values	must be between	-10	and	10 mm"}
 	offsetx	/= 1000
 	offsety	/= 1000
-	z_final_height = (5 / 1000)
+	z_final_height = (4 / 1000)
 	current_movement_vector	= Vector3(0, 0, 0)
 	current_rotation_vector	= Vector3(0, 0, 0)
 	start_height = None
@@ -101,7 +104,6 @@ async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 
 
 
-
 	def jog_background_task(stop_event: threading.Event):
 		"""
 		Sends the jog flag every 10ms until stop_event is set or 500ms elapse.
@@ -110,10 +112,7 @@ async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 		start_time = time.time()
 		while (time.time() - start_time < 0.5) and not stop_event.is_set():
 			lara.robot.jog(set_jogging_external_flag=1)
-			current_time = time.time()
-			time_in_between = (current_time - start_time) * 1000  # Convert to milliseconds
-			# print(f"Time in between: {time_in_between:.2f} ms")
-			start_time = current_time
+
 	def	start_jog(velocity):
 		"""
 		Turns on jog and starts	the	background thread.
@@ -171,7 +170,6 @@ async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 			)
 			# 4) Current robot pose	in the world
 			lara_global_pose = lara.current_pose_raw()
-			print(f"Current robot pose: {lara_global_pose}")
 			# ---- Convert to 4x4 transforms ----
 			T_robot_world	= Matrix4.from_pose(lara_global_pose)	 # Robot in world
 			T_camera_robot	= Matrix4.from_pose(offset_camera_pose)	  # Camera in robot
@@ -286,28 +284,30 @@ async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
 				current_rotation_vector.x =	0
 				current_rotation_vector.y =	0
 				current_rotation_vector.z =	0
-				start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
-				continue
-			else:
-				if abs(delta_t.z) <	z_final_height:
-					stop_jog()
-					print("Finished aligning to tag")
-					break
+				if allowed_error_xy <= 0.1 / 1000:
+					print("fine tune")
+					#fine tune we dont use start_jog routine but instead we manually move one jog step at a time
+					stop_jog() # in case we were jogging
+					lara.robot.turn_on_jog(jog_velocity=[current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z], jog_type='Cartesian')
+					lara.robot.jog(set_jogging_external_flag=1)
+					lara.robot.turn_off_jog()
+					continue
 				else:
-					current_movement_vector.x =	0
-					current_movement_vector.y =	0
-					current_movement_vector.z =	-1
-					current_rotation_vector.x =	0
-					current_rotation_vector.y =	0
-					current_rotation_vector.z =	0
 					start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
-			if abs(delta_t.z) <	z_final_height:
-				stop_jog()
-				print("Finished aligning to tag")
-				break
+					continue
+			else:
+				current_movement_vector.x =	0
+				current_movement_vector.y =	0
+				current_movement_vector.z =	-1
+				current_rotation_vector.x =	0
+				current_rotation_vector.y =	0
+				current_rotation_vector.z =	0
+				start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
+		if abs(delta_t.z) <=z_final_height:
+			break
 		print("finish loop")
 		time.sleep(0.01)
-	print("saving data")
+	stop_jog()
 	if save_data:
 		with open("poses.json", "w") as f:
 			json.dump(poses, f, indent=4)
@@ -496,10 +496,10 @@ def	load_calibration_file(calibration_file_path):
 		dist_arr = np.array(reconstruction['dist'])
 		fx,	fy,	cx,	cy = mtx_arr[0,	0],	mtx_arr[1, 1], mtx_arr[0, 2], mtx_arr[1, 2]
 		# adjust for the capture resolution	from original
-		fx *= capture_resolution[0]	/ original_capture_resoltion[0]
-		fy *= capture_resolution[1]	/ original_capture_resoltion[1]
-		cx *= capture_resolution[0]	/ original_capture_resoltion[0]
-		cy *= capture_resolution[1]	/ original_capture_resoltion[1]
+		fx *= current_setting_resolution[0]	/ original_capture_resoltion[0]
+		fy *= current_setting_resolution[1]	/ original_capture_resoltion[1]
+		cx *= current_setting_resolution[0]	/ original_capture_resoltion[0]
+		cy *= current_setting_resolution[1]	/ original_capture_resoltion[1]
 
 		mtx	= [fx, fy, cx, cy]
 		dist = dist_arr
@@ -565,7 +565,7 @@ def	add_vertical_gradient(image, top_value=1.3,	bottom_value=1.0):
 
 
 def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
-	global last_tag_data
+	global last_tag_data, current_setting_resolution, change_camera_flag, close_up_resolution, far_resolution
 
 	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 	img	= undistort_image(img, mtx,	dist)
@@ -629,6 +629,16 @@ def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
 				"w": quat[3]
 			}
 		}
+		#check if tag 0 is closer than 10mm
+		if d.tag_id == 0:
+			if raw_z < 0.03 and current_setting_resolution != close_up_resolution:
+				print("Changing camera resolution to close up")
+				current_setting_resolution = close_up_resolution
+				change_camera_flag = True
+			elif raw_z >= 0.04 and current_setting_resolution != far_resolution: # histeresis
+				print("Changing camera resolution to far")
+				current_setting_resolution = far_resolution
+				change_camera_flag = True
 
 		rvec, _	= cv2.Rodrigues(rmat)
 		cv2.drawFrameAxes(
@@ -769,8 +779,8 @@ def	camera_loop():
 		print(f"Could not open camera {initial_camera} after retries. Exiting camera loop.")
 		return
 
-	cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture_resolution[0])
-	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_resolution[1])
+	cap.set(cv2.CAP_PROP_FRAME_WIDTH, current_setting_resolution[0])
+	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, current_setting_resolution[1])
 	cap.set(cv2.CAP_PROP_FPS, frame_rate)
 
 	udp_thread = threading.Thread(target=udp_server, daemon=True)
@@ -792,8 +802,8 @@ def	camera_loop():
 				if cap is None:
 					print("Could not re-open camera	after retries. Exiting camera loop.")
 					break
-				cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture_resolution[0])
-				cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_resolution[1])
+				cap.set(cv2.CAP_PROP_FRAME_WIDTH, current_setting_resolution[0])
+				cap.set(cv2.CAP_PROP_FRAME_HEIGHT, current_setting_resolution[1])
 				cap.set(cv2.CAP_PROP_FPS, frame_rate)
 				continue
 
@@ -817,8 +827,8 @@ def	camera_loop():
 				if cap is None:
 					print(f"Failed to open camera {new_camera} after retries. Exiting loop.")
 					break
-				cap.set(cv2.CAP_PROP_FRAME_WIDTH, capture_resolution[0])
-				cap.set(cv2.CAP_PROP_FRAME_HEIGHT, capture_resolution[1])
+				cap.set(cv2.CAP_PROP_FRAME_WIDTH, current_setting_resolution[0])
+				cap.set(cv2.CAP_PROP_FRAME_HEIGHT, current_setting_resolution[1])
 				cap.set(cv2.CAP_PROP_FPS, frame_rate)
 				print(f"Switched to camera {new_camera}")
 				change_camera_flag = False
@@ -836,13 +846,6 @@ def	camera_loop():
 				print("Entering	calibration	mode. Press	'x'	to exit	and	fit	polynomials.")
 				is_calibrating = True
 				cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
-
-			# Check	any	commands from UDP
-			if not command_queue.empty():
-				command	= command_queue.get().split(" ")
-				if command[0] == "switch_camera":
-					# ...
-					pass
 
 			stream.set_frame(resized)
 

@@ -21,7 +21,7 @@ else :
 
 VERSION = "v4.11.0-alpha.74"
     
-LOGLEVEL = os.getenv('NEURAPY_LOG_LEVEL','WARNING')
+LOGLEVEL = os.getenv('NEURAPY_LOG_LEVEL', 'DEBUG')
 
 MONITOR_CYCLE_TIME = 0.05
 
@@ -188,7 +188,10 @@ class Robot:
             "program_status",
             "compute_inverse_kinematics",
             "get_flange_pose_quaternion",
-            "get_tool_flange_pose"
+            "get_tool_flange_pose",
+            "plan_move_linear_relative",
+            "get_current_joint_angles",
+            "executor"
         ]
         self.logger = neurapy_logger
         
@@ -204,7 +207,7 @@ class Robot:
         self.logger.info(f"Robot initialized with following functions {self.__functions} and robot version {self.version}")
         if self.version != VERSION:
             self.logger.warning("Current client version is not compatiable with the version of the server running on the robot. Some of the functionlities specified in the documentation might not work in the intended way. Please upgrade to the correct version .Client Version : {VERSION},Server Version : {self.version}")
-        self.start_diagnostics_monitor()
+        #self.start_diagnostics_monitor()
         
     def help(self, name):
         print(self.get_doc(name))
