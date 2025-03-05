@@ -99,6 +99,8 @@ let ws: WebSocket;
 export const isPaused: Writable<boolean> = writable(false);
 export const error: Writable<{}> = writable({});
 export const warning: Writable<{}> = writable({});
+export const torques: Writable<{}> = writable({});
+export const autonomous_control: Writable<boolean> = writable(false);
 
 export let data = writable({});
 export function connectApi() {
@@ -126,7 +128,12 @@ export function connectApi() {
         if (temp.hasOwnProperty("warning")) {
             warning.set(temp.warning);
         }
-        
+        if (temp.hasOwnProperty("torques")) {
+            torques.set(temp.torques);
+        }
+        if (temp.hasOwnProperty("autonomous_control")) {
+            autonomous_control.set(temp.autonomous_control);
+        }
 
         data.set(temp);
         

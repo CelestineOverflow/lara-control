@@ -10,23 +10,15 @@ import queue
 from scipy.spatial.transform import	Rotation
 from pupil_apriltags import	Detector
 from mjpeg_streamer	import MjpegServer,	Stream
-from scipy.optimize	import curve_fit
 import time
-from typing	import Dict, Union,	Optional
 from fastapi import	FastAPI, WebSocket
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
 from contextlib	import asynccontextmanager
 from fastapi.middleware.cors import	CORSMiddleware
-from space import Euler, Vector3, Quaternion, Matrix4, Pose, PoseCartesian, Vector2
+from space import Euler, Vector3, Quaternion, Matrix4, Pose, PoseCartesian, Vector2, deg2rad, scale_values
 from lara import Lara
 
-
-
-lara = Lara()
-
 # -------------------- GLOBAL FLAGS	--------------------
-
+lara = Lara()
 states = ["normal",	"square_detector", "tag_detector"]
 state =	states[2]
 current_camera_index = 0
@@ -37,6 +29,22 @@ ip = "192.168.2.209"
 close_up_resolution = (1280, 720)
 far_resolution = (1920, 1080)
 current_setting_resolution = far_resolution
+current_data = None
+# Intrinsics
+mtx	= None
+dist = None
+_offset_pos = Vector3(0, 0, 0)
+_offset_quat = Quaternion(0, 0, 0, 1)
+offset_tag = Pose(_offset_pos, _offset_quat)
+try:
+	with open('offset_tag.json', 'r') as f:
+		offset_tag_json = f.read()
+		offset_tag = Pose.from_json(offset_tag_json)
+
+except FileNotFoundError:
+	print("No offset tag file found")
+except json.JSONDecodeError:
+	print("Error reading offset tag file")
 
 # ---------------------	API	---------------------
 @asynccontextmanager
@@ -44,12 +52,16 @@ async def lifespan(app:	FastAPI):
 	global camera_thread, stop_camera_thread
 	stop_camera_thread = False
 
+	# Detector Thread 
+
+
 	# Start	your camera	loop in a thread
 	camera_thread =	threading.Thread(target=camera_loop, daemon=True)
 	camera_thread.start()
 
 	#connect to the	robot
 	lara = Lara()
+	lara.robot.stop()
 	await lara.connect_socket()
 	print("Connected to the	robot")
 	lara.robot.turn_off_jog()
@@ -83,235 +95,305 @@ def	set_state(new_state: str):
 	return {"status": "ok",	"new_state": state}
 
 
-current_data = None
-
-@app.post("/AlignToTag")
-async def align_to_tag(offsetx:	float =	0, offsety:	float =	0):
-	global lara, current_data
-	if offsetx > 10 or offsetx < -10 or offsety	> 10 or offsety	< -10:
-		return {"error": "Offset values	must be between	-10	and	10 mm"}
-	offsetx	/= 1000
-	offsety	/= 1000
-	z_final_height = (4 / 1000)
-	current_movement_vector	= Vector3(0, 0, 0)
-	current_rotation_vector	= Vector3(0, 0, 0)
-	start_height = None
-	last_height = False
-	# Thread control variables
-	jog_thread = None
-	stop_jog_event = threading.Event()
-	save_data = True
 
 
+@app.post("/test_area")
+async def test_area(x: float, y: float, z: float):
+	global lara
+	x = x / 1000
+	y = y / 1000
+	z = z / 1000
+	err = move_relative(x, y, z, 0, 0, 0)
+	if not err:
+		return {"error": "No movement detected"}
+	else:
+		return {"status": "ok"}
 
-	def jog_background_task(stop_event: threading.Event):
-		"""
-		Sends the jog flag every 10ms until stop_event is set or 500ms elapse.
-		Prints the time in between in milliseconds.
-		"""
-		start_time = time.time()
-		while (time.time() - start_time < 0.5) and not stop_event.is_set():
-			lara.robot.jog(set_jogging_external_flag=1)
+def move_relative(x, y, z, rx, ry, rz):
+	'''
+	Move robot relative to current position
+	
+	Args:
+		x, y, z: relative movement in meters
+		rx, ry, rz: relative rotation in radians
+		
+	Returns:
+		bool: True if movement was successful (robot moved), False otherwise
+	'''
+	global lara
+	
+	# Get current TCP pose
+	current_tcp_pose = lara.robot.get_tcp_pose()
+	
+	# Calculate target pose
+	target_pose = [
+		current_tcp_pose[0] + x,
+		current_tcp_pose[1] + y,
+		current_tcp_pose[2] + z,
+		current_tcp_pose[3] + rx,
+		current_tcp_pose[4] + ry,
+		rz
+	]
+	
+	# Setup movement properties
+	linear_property = {
+		"speed": 0.25,
+		"acceleration": 0.1,
+		"blending_mode": 1,
+		"blend_radius": 0.005,
+		"target_pose": [
+			current_tcp_pose,
+			target_pose
+		],
+		"current_joint_angles": lara.robot.robot_status("jointAngles"),
+		"dwell_time_left": 0.0,
+		"dwell_time_right": 0.0,
+		"elevation": 0.0,
+		"azimuth": 0.0
+	}
+	
+	# Execute movement
+	lara.robot.set_mode("Automatic")
+	err = lara.robot.move_linear(**linear_property)
+	time.sleep(0.5)
+	
+	# Get new pose after movement
+	new_pose = lara.robot.get_tcp_pose()
+	
+	# Define thresholds for determining if movement occurred
+	position_threshold_mm = 0.1  # 0.1mm
+	rotation_threshold_deg = 0.1  # 0.1 degrees
+	
+	# Calculate differences
+	diff_x = abs(new_pose[0] - current_tcp_pose[0]) * 1000  # convert to mm
+	diff_y = abs(new_pose[1] - current_tcp_pose[1]) * 1000
+	diff_z = abs(new_pose[2] - current_tcp_pose[2]) * 1000
+	diff_rx = abs(new_pose[3] - current_tcp_pose[3]) * 180 / math.pi  # convert to degrees
+	diff_ry = abs(new_pose[4] - current_tcp_pose[4]) * 180 / math.pi
+	diff_rz = abs(new_pose[5] - current_tcp_pose[5]) * 180 / math.pi
+	
+	# Check if movement was significant
+	position_moved = (diff_x > position_threshold_mm or 
+					 diff_y > position_threshold_mm or 
+					 diff_z > position_threshold_mm)
+					 
+	rotation_moved = (diff_rx > rotation_threshold_deg or 
+					 diff_ry > rotation_threshold_deg or 
+					 diff_rz > rotation_threshold_deg)
+	
+	# Return False if there was significant movement
+	result =  (position_moved or rotation_moved)
+	print(f"Position moved: {position_moved}, Rotation moved: {rotation_moved}")
+	return result
 
-	def	start_jog(velocity):
-		"""
-		Turns on jog and starts	the	background thread.
-		"""
-		nonlocal jog_thread, stop_jog_event
-		# Stop any existing	thread
-		if jog_thread and jog_thread.is_alive():
-			stop_jog_event.set()
-			jog_thread.join()
-		# Turn on jog
-		lara.robot.turn_on_jog(jog_velocity=velocity, jog_type='Cartesian')
-		# Start	background thread
-		stop_jog_event = threading.Event()
-		jog_thread = threading.Thread(target=jog_background_task, args=(stop_jog_event,), daemon=True)
-		jog_thread.start()
 
-	def	stop_jog():
-		"""
-		Turns off jog and stops	the	background thread.
-		"""
-		nonlocal jog_thread, stop_jog_event
-		stop_jog_event.set()
-		lara.robot.turn_off_jog()
-		if jog_thread and jog_thread.is_alive():
-			jog_thread.join()
-	poses = {}
+@app.post("/SetOffSet")
+async def setOffset():
+	global current_data, offset_tag
+	offset_tag = Pose(Vector3(0, 0, 0), Quaternion(0, 0, 0, 1))
+	await asyncio.sleep(0.5)
+	counter = 0
 	while True:
+		counter += 1
 		if current_data:
 			try:
-				position = Vector3(
-				x=current_data[0]['x'],
-				y=current_data[0]['y'],
-				z=current_data[0]['z']
-				)
-				quaternion = Quaternion(
-					x=current_data[0]['quaternion']['x'],
-					y=current_data[0]['quaternion']['y'],
-					z=current_data[0]['quaternion']['z'],
-					w=current_data[0]['quaternion']['w']
-				)
-			#if key error continue
+				offset_tag = current_data[0]
+				offset_tag_json = offset_tag.to_json()
+				with open('offset_tag.json', 'w') as f:
+					f.write(offset_tag_json)
+				return {"status": "ok"}
 			except KeyError:
 				continue
+		await asyncio.sleep(0.5)
+		if counter > 10:
+			return {"error": "No data received from the camera"}
+@app.post("/AlingMove")
+async def AlingMove():
+	global lara, current_data
+	counter = 0
+	flag_buffered_movement = False
+	current_translation_speed = 4
+	await lara.set_translation_speed_mms(current_translation_speed)
+	import socketio
+	sio = socketio.AsyncClient(logger=False, engineio_logger=False)
+	await sio.connect('http://192.168.2.13:8081')
+	async def heart_beat(*args, **kwargs):
+		await sio.emit('heartbeat_response', True)
+		print("Heartbeat response")
+	sio.on('heartbeat_check', heart_beat)
+	async def start_movement_slider(q0, q1, q2, q3, q4, q5):
+		data = {
+			'q0': q0,
+			'q1': q1,
+			'q2': q2,
+			'q3': q3,
+			'q4': q4,
+			'q5': q5,
+			'status': True,
+			'joint': False,
+			'cartesian': True,
+			'freedrive': False,
+			'button': False,
+			'slider': True,
+			'goto': False,
+			'threeD': False,
+			'reference': "Base",
+			'absrel': "Absolute",
+		}
+		await sio.emit('CartesianSlider', data)
+	async def stop_movement_slider(q0, q1, q2, q3, q4, q5):
+		data = {
+			'q0': q0,
+			'q1': q1,
+			'q2': q2,
+			'q3': q3,
+			'q4': q4,
+			'q5': q5,
+			'status': False,
+			'joint': False,
+			'cartesian': True,
+			'freedrive': False,
+			'button': False,
+			'slider': True,
+			'goto': False,
+			'threeD': False,
+			'reference': "Base"
+		}
+		await sio.emit('CartesianSlider', data)
 
-			detected_pose =	Pose(position, quaternion)
-			# 2) Camera	offset pose
-			offset_camera_pose = Pose(
-				position=Vector3(0.0, 0.0, 0.0),
-				orientation=Quaternion(0, 0, 0, 1)
-			)
-			# 3) Custom	offset pose
-			custom_offset =	Pose(
-				position=Vector3(-offsetx, -offsety, 0),
-				orientation=Quaternion(0, 0, 0, 1)
-			)
-			# 4) Current robot pose	in the world
-			lara_global_pose = lara.current_pose_raw()
-			# ---- Convert to 4x4 transforms ----
-			T_robot_world	= Matrix4.from_pose(lara_global_pose)	 # Robot in world
-			T_camera_robot	= Matrix4.from_pose(offset_camera_pose)	  # Camera in robot
-			T_tag_camera	= Matrix4.from_pose(detected_pose)		  # Tag	in camera
-			T_custom_offset	= Matrix4.from_pose(custom_offset)		  # Custom offset
-			# 5) Compute T_tag_world
-			T_tag_world	= T_robot_world	* T_camera_robot * T_tag_camera	* T_custom_offset
-			# 6) For a simple “align” scenario,	let’s say we want the end-effector exactly where the tag is
-			T_robot_world_desired =	T_tag_world
-			# 7) Compute the delta transform from the robot’s current pose to the desired
-			T_delta	= T_robot_world.inverse() *	T_robot_world_desired
-			# 8) Extract the translation + rotation	from T_delta
-			delta_q, delta_t = T_delta.to_quaternion_translation()
-			# 9) Save pose data
-			if start_height is None:
-				start_height = (delta_t.z - z_final_height)
-				poses["start"] = {
-					"tag": detected_pose.to_dict(),
-					"robot": lara.current_pose().to_dict()
-				}
-				with open("poses.json", "r") as f:
-					last_data = f.read()
-					if last_data:
-						last_data = json.loads(last_data)
-						print(last_data)
-						# {'start': {'tag': {'position': [0.006143113998528555, 3.539078098373626e-05, 0.15121875647756386], 'orientation': [-0.1405898207550043, -0.00013636909131212118, 0.001801615349748799, 0.990066279541768]}, 'robot': {'position': [-0.15054610319842335, -0.5042284902953714, 0.21357617464788223], 'orientation': [-3.141576975550517, 2.6772147986742212e-05, -0.6197900824584184]}}, 'last': {'tag': {'position': [0.005648809324801668, 8.474977878136805e-05, 0.1359475291901317], 'orientation': [0.09830618284612178, -0.008742056127883127, 0.0021144961202943114, 0.9951155710645067]}, 'robot': {'position': [-0.15050097488787906, -0.5042355261944492, 0.19531571921122606], 'orientation': [-3.141581273516387, 3.0063411917469196e-05, -0.6196937818443564]}}}
-						#check distance against start in x y z of the current tag detection with the past start tag detection
-						last_tag_start = last_data["start"]["tag"]
-						x_error = abs(last_tag_start["position"][0] - detected_pose.position.x)
-						y_error = abs(last_tag_start["position"][1] - detected_pose.position.y)
-						z_error = abs(last_tag_start["position"][2] - detected_pose.position.z)
-						print(f"X error: {x_error * 1000:.2f} mm Y error: {y_error * 1000:.2f} mm Z error: {z_error * 1000:.2f} mm")
-						if x_error < 0.01 and y_error < 0.01 and z_error < 0.10:
-							#move arm to last position to speed up the process
-							print("Moving arm to known position")
-							save_data = False
-							last_arm_pose = last_data["last"]["robot"]
-							cartesianPose = PoseCartesian.from_dict(last_arm_pose)
-							lara.move_to_pose_cartesian_from_current(cartesianPose)
-			#check if last 10mm
-			else:
-				if abs(delta_t.z - z_final_height) < 0.01 and last_height == False:
-					print("saving last position, last 10mm")
-					poses[f"last"] = {
-						"tag": detected_pose.to_dict(),
-						"robot": lara.current_pose().to_dict()
-					}
-					last_height = True
-			# print(f"Delta translation: {(delta_t.z - z_final_height) * 1000:.2f} mm")
-			# rotation
-			rot_z =	delta_q.to_euler().z
-			allowed_error_rot =	0.2
-			if abs(delta_t.z) >	((50 / 1000) + z_final_height):
-				allowed_error_rot =	0.1
-			elif abs(delta_t.z)	> ((30 / 1000) + z_final_height):
-				allowed_error_rot =	0.05
-			else:
-				allowed_error_rot =	0.01
-			if not (rot_z <	allowed_error_rot and rot_z	> -allowed_error_rot):
-				current_movement_vector.x =	0
-				current_movement_vector.y =	0
-				current_movement_vector.z =	0
-				current_rotation_vector.x =	0
-				current_rotation_vector.y =	0
-				current_rotation_vector.z =	-1 if rot_z	> 0	else 1
-				start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
-				continue # Skip	the	translation	if the rotation	is not aligned
-			# translation
-			fine_tune_speed	= 0.1
-			normal_speed = 1.0
-			Kp = 25.0
+	#rough alligment phase
+	detection_timeout = 0.25 # 250ms
+	last_detection_time = time.time()
+	success = True
+	while True:
+		if current_data:
+			counter += 1
+			tag0 = current_data.get(0)
+			position = tag0.position
+			quaternion = tag0.orientation
+			print(f"Position: {position.x * 1000:.2f} mm, {position.y * 1000:.2f} mm, {position.z * 1000:.2f} mm")
+			last_detection_time = time.time()
+			current_arm_pose = lara.current_pose_raw()
+			current_arm_orientation = current_arm_pose.orientation
+			current_arm_orientation_euler = current_arm_orientation.to_euler()
 
-			# X	movement
-			err_x =	delta_t.x
-			if abs(err_x) <	0.0001:
-				current_movement_vector.x =	0
+			current_tag_orientation = quaternion.to_euler()
+			angle_tag_z = current_tag_orientation.z
+			angle_arm_z = current_arm_orientation_euler.z
+			# print(f"Tag angle: {angle_tag_z * 180 / math.pi:.2f} Arm angle: {angle_arm_z * 180 / math.pi:.2f}")
+			V2 = Vector2(position.x, position.y)
+			V2 = V2.rotate(angle_arm_z)
+			
+			# print(f"Original x: {position.x * 1000:.2f} mm Original y: {position.y * 1000:.2f}")
+			# print(f"Test x: {V2.x * 1000:.2f} mm Test y: {V2.y * 1000:.2f} mm, rotation: {angle_arm_z }")
+			tcp_pose = lara.robot.get_tcp_pose()
+			# print(f"Tag angle: {angle_tag_z * 180 / math.pi:.2f}")
+			# print(f"Arm angle: {tcp_pose[3] * 180 / math.pi:.2f}")
+			# print(f"Arm angle 3 : {tcp_pose[3] * 180 / math.pi:.2f}")
+			# print(f"Arm angle 4 : {tcp_pose[4] * 180 / math.pi:.2f}")
+			# print(f"Arm angle 5 : {tcp_pose[5] * 180 / math.pi:.2f}")
+			if position.z < 0.01:
+				break
+			#starting tolerances
+			tolerance = 0.01 # 20mm
+			rotation_tolerance = deg2rad(1) # 2 degrees
+			if position.z < 0.1: # less than 100mm
+				tolerance = 0.05 # 10mm
+				rotation_tolerance = deg2rad(0.75)
+			if position.z < 0.05: # less than 50mm
+				tolerance = 0.003 # 5mm
+				rotation_tolerance = deg2rad(0.5)
+			if position.z < 0.03: # less than 30mm
+				tolerance = 0.002 # 2mm
+				rotation_tolerance = deg2rad(0.2)
+			if success:
+				flag_buffered_movement = True
+				await stop_movement_slider(0, 0, 0, 0, 0, 0)
+				#add to the final tcp pose the z angle of the tag
+				final_z_angle = tcp_pose[5] - angle_tag_z
+				#normalize the angle between -pi and pi
+				final_z_angle = (final_z_angle + math.pi) % (2 * math.pi) - math.pi
+				success = move_relative(-V2.x, -V2.y, 0, 0, 0, final_z_angle)
+				await asyncio.sleep(0.05)
 			else:
-				proportional_speed_x = -Kp * err_x
-				if abs(proportional_speed_x) < fine_tune_speed:
-					proportional_speed_x = fine_tune_speed if proportional_speed_x > 0 else	-fine_tune_speed
-				elif abs(proportional_speed_x) > normal_speed:
-					proportional_speed_x = normal_speed	if proportional_speed_x	> 0	else -normal_speed
-				current_movement_vector.x =	proportional_speed_x
-
-			# Y	movement
-			err_y =	delta_t.y
-			if abs(err_y) <	0.0001:
-				current_movement_vector.y =	0
+				if flag_buffered_movement:
+					lara.robot.stop()
+					lara.robot.set_mode("Teach")
+					lara.robot.unpause()
+					flag_buffered_movement = False
+					await asyncio.sleep(0.3)
+				await start_movement_slider(0, 0, -1, 0, 0, 0)
+				await asyncio.sleep(0.05)
+				if not (abs(V2.x) < tolerance and abs(V2.y) < tolerance and abs(angle_tag_z) < rotation_tolerance):
+					print("Movement needed")
+					success = True
+				
+		else:
+			if time.time() - last_detection_time > detection_timeout:
+				await start_movement_slider(0, 0, 0, 0, 0, 0)
+				await asyncio.sleep(0.5)
+				lara.robot.stop()
+				lara.robot.set_mode("Teach")
+				return {"error": "No data received from the camera"}
+			await asyncio.sleep(0.05)
+	lara.robot.stop()
+	lara.robot.set_mode("Teach")
+	lara.robot.unpause()
+	lara.robot.stop()
+	#fine alligment phase
+	await lara.set_translation_speed_mms(1)#
+	detection_timeout = 0.2 # 200ms
+	last_detection_time = time.time()
+	while True:
+		if current_data:
+			counter += 1
+			tag0 = current_data.get(0)
+			position = tag0.position
+			quaternion = tag0.orientation
+			last_detection_time = time.time()
+			if position.z < 0.005: # 5mm
+				break
+			V2 = Vector2(position.x, position.y)
+			V2 = V2.rotate(angle_arm_z)
+			#0.1 mm precision
+			if abs(V2.x) < 0.0001 and abs(V2.y) < 0.0001:
+				# await start_movement_slider(0, 0, -1, 0, 0, 0)
+				lara.robot.turn_on_jog(jog_velocity=[0, 0, -1, 0, 0, 0], jog_type='Cartesian')
+				lara.robot.jog(set_jogging_external_flag=1)
 			else:
-				proportional_speed_y = -Kp * err_y
-				if abs(proportional_speed_y) < fine_tune_speed:
-					proportional_speed_y = fine_tune_speed if proportional_speed_y > 0 else	-fine_tune_speed
-				elif abs(proportional_speed_y) > normal_speed:
-					proportional_speed_y = normal_speed	if proportional_speed_y	> 0	else -normal_speed
-				current_movement_vector.y =	proportional_speed_y
-
-			# Z	movement
-		
-			if abs(delta_t.z) >	((50 / 1000) + z_final_height):
-				allowed_error_xy = 10 /	1000
-			elif abs(delta_t.z)	> ((30 / 1000) + z_final_height):
-				allowed_error_xy = 3 / 1000
-			elif abs(delta_t.z)	> ((5 /	1000) +	z_final_height):
-				allowed_error_xy = 1 / 1000
-			elif abs(delta_t.z)	> ((1 /	1000) +	z_final_height):
-				allowed_error_xy = 0.1 / 1000
-			else: 
-				allowed_error_xy = 0.05 / 1000
-			if not (abs(delta_t.x) < allowed_error_xy and abs(delta_t.y) < allowed_error_xy):
-				#we dont wanna move z or rotate if x and y are not aligned
-				current_movement_vector.z =	0
-				current_rotation_vector.x =	0
-				current_rotation_vector.y =	0
-				current_rotation_vector.z =	0
-				if allowed_error_xy <= 0.1 / 1000:
-					print("fine tune")
-					#fine tune we dont use start_jog routine but instead we manually move one jog step at a time
-					stop_jog() # in case we were jogging
-					lara.robot.turn_on_jog(jog_velocity=[current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z], jog_type='Cartesian')
-					lara.robot.jog(set_jogging_external_flag=1)
-					lara.robot.turn_off_jog()
-					continue
-				else:
-					start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
-					continue
-			else:
-				current_movement_vector.x =	0
-				current_movement_vector.y =	0
-				current_movement_vector.z =	-1
-				current_rotation_vector.x =	0
-				current_rotation_vector.y =	0
-				current_rotation_vector.z =	0
-				start_jog([current_movement_vector.x, current_movement_vector.y, current_movement_vector.z, current_rotation_vector.x, current_rotation_vector.y, current_rotation_vector.z])
-		if abs(delta_t.z) <=z_final_height:
-			break
-		print("finish loop")
-		time.sleep(0.01)
-	stop_jog()
-	if save_data:
-		with open("poses.json", "w") as f:
-			json.dump(poses, f, indent=4)
+				# await start_movement_slider(-V2.x, -V2.y, 0, 0, 0, 0)
+				lara.robot.turn_on_jog(jog_velocity=[-V2.x, -V2.y, 0, 0, 0, 0], jog_type='Cartesian')
+				lara.robot.jog(set_jogging_external_flag=1)
+			await asyncio.sleep(0.05)
+		else:
+			if time.time() - last_detection_time > detection_timeout:
+				lara.robot.turn_off_jog()
+				await asyncio.sleep(0.5)
+				lara.robot.stop()
+				return {"error": "No data received from the camera"}
+			await asyncio.sleep(0.05)
+	lara.robot.turn_off_jog()
+	lara.robot.stop()
+	await asyncio.sleep(0.5)
+	await sio.disconnect()
 	return {"status": "ok"}
+
+@app.post("/Retract")
+async def Retract():
+	global lara
+	lara.retract()
+
+
+@app.get("/get_pose")
+async def get_pose():
+	counter = 0
+	while True:
+		if current_data:
+			return {"pose": current_data[0]}
+		await asyncio.sleep(0.1)
+		counter += 1
+		if counter > 10:
+			return {"error": "No data received from the camera"}
 
 
 @app.post("/set_camera/{index}")
@@ -320,6 +402,12 @@ def	set_camera(index: int):
 	current_camera_index = index
 	change_camera_flag = True
 	return {"state": state,	"camera": current_camera_index}
+
+@app.post("/set_rotation_speed/{speed}")
+async def set_rotation_speed(speed: int):
+	global lara
+	await lara.set_rotation_speed_degs(speed)
+	return {"status": "ok"}
 
 @app.get("/get_state")
 def	get_state():
@@ -484,9 +572,7 @@ at_detector	= Detector(
 	debug=0
 )
 
-# Intrinsics
-mtx	= None
-dist = None
+
 
 def	load_calibration_file(calibration_file_path):
 	global mtx,	dist
@@ -515,21 +601,6 @@ FONT_SCALE_INFO	= 1.0
 FONT_THICKNESS = 4
 BOX_THICKNESS =	4
 
-def	polynomial_model(z,	a, b, c):
-	return a * (z ** 2) + b	* z	+ c
-
-def	apply_camera_offsets(cam_index,	raw_x, raw_y, raw_z):
-	if cam_index not in camera_fits:
-		return raw_x, raw_y
-	coeffs_x = camera_fits[cam_index].get("coeffs_x", None)
-	coeffs_y = camera_fits[cam_index].get("coeffs_y", None)
-	if coeffs_x	is None	or coeffs_y	is None:
-		return raw_x, raw_y
-	offset_x = polynomial_model(raw_z, *coeffs_x)
-	offset_y = polynomial_model(raw_z, *coeffs_y)
-	corrected_x	= raw_x	+ offset_x
-	corrected_y	= raw_y	+ offset_y
-	return corrected_x,	corrected_y
 
 
 def	add_vertical_gradient(image, top_value=1.3,	bottom_value=1.0):
@@ -565,7 +636,7 @@ def	add_vertical_gradient(image, top_value=1.3,	bottom_value=1.0):
 
 
 def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
-	global last_tag_data, current_setting_resolution, change_camera_flag, close_up_resolution, far_resolution
+	global last_tag_data, current_setting_resolution, change_camera_flag, close_up_resolution, far_resolution, offset_tag
 
 	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 	img	= undistort_image(img, mtx,	dist)
@@ -613,22 +684,12 @@ def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
 		rmat, tvec = d.pose_R, d.pose_t
 		quat = Rotation.from_matrix(rmat).as_quat()
 
-		raw_y =	-tvec[0][0]
+		raw_y =	-tvec[0][0] 
 		raw_x =	-tvec[1][0]
-		raw_z =	tvec[2][0] - 0.020 # offset	for	the	camera
-
-		detectionsVectors[d.tag_id]	= {
-			"x": raw_x,
-			"y": raw_y,
-			"z": raw_z,
-			"camera": current_camera_index,
-			"quaternion": {
-				"x": quat[0],
-				"y": quat[1],
-				"z": quat[2],
-				"w": quat[3]
-			}
-		}
+		raw_z =	tvec[2][0]
+		_tag_position =  Vector3(raw_x, raw_y, raw_z) - offset_tag.position
+		#todo add the offsetquat
+		detectionsVectors[d.tag_id] = Pose(_tag_position,  Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3]))
 		#check if tag 0 is closer than 10mm
 		if d.tag_id == 0:
 			if raw_z < 0.03 and current_setting_resolution != close_up_resolution:
@@ -652,9 +713,9 @@ def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
 
 		pitch, roll, yaw = Rotation.from_matrix(rmat).as_euler('xyz')
 		text_lines = [
-			f"x: {raw_x*1000:.2f} mm",
-			f"y: {raw_y*1000:.2f} mm",
-			f"z: {raw_z*1000:.2f} mm",
+			f"x: {detectionsVectors[d.tag_id].position.x*1000:.2f} mm",
+			f"y: {detectionsVectors[d.tag_id].position.y*1000:.2f} mm",
+			f"z: {detectionsVectors[d.tag_id].position.z*1000:.2f} mm",
 			f"pitch: {pitch:.2f}",
 			f"roll:	{roll:.2f}",
 			f"yaw: {yaw:.2f}",
@@ -671,51 +732,11 @@ def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
 				2
 			)
 
-		tag_hist = compute_histogram(gray, corners)
-		last_tag_data[d.tag_id]	= {
-			"corners": corners,
-			"hist":	tag_hist
-		}
-
-	# Show old bounding	boxes for tags not seen	this frame
-	for	stored_tag_id, data	in last_tag_data.items():
-		if stored_tag_id not in current_frame_tags:
-			old_corners	= data["corners"]
-			for	i in range(4):
-				pt1	= (int(old_corners[i][0]), int(old_corners[i][1]))
-				pt2	= (int(old_corners[(i +	1) % 4][0]), int(old_corners[(i	+ 1) % 4][1]))
-				cv2.line(img, pt1, pt2,	(255, 0, 255), BOX_THICKNESS)
-
-	y_offset = 20
-	for	tag_id,	data in last_tag_data.items():
-		draw_histogram(img,	data["hist"], tag_id, x_offset=20, y_offset=y_offset)
-		y_offset += 140
 
 	return img,	detectionsVectors
 
-def	send_udp_data(data):
-	global current_data
-	current_data = data
 
 command_queue =	queue.Queue()
-
-def	udp_server():
-	UDP_IP = "0.0.0.0"
-	UDP_PORT = 9876
-	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	sock.bind((UDP_IP, UDP_PORT))
-	sock.setblocking(False)
-
-	while True:
-		try:
-			data, addr = sock.recvfrom(1024)
-			command	= data.decode().strip()
-			command_queue.put(command)
-		except BlockingIOError:
-			pass
-		except Exception as e:
-			print(f"UDP	server error: {e}")
-			break
 
 def	initialize_camera(index):
 	preset = camera_presets.get(index, {})
@@ -750,7 +771,7 @@ def	open_camera_with_retry(camera_index, max_retries=-1, delay_seconds=5):
 
 
 def	camera_loop():
-	global current_camera_index, change_camera_flag, state, ip
+	global current_camera_index, change_camera_flag, state, ip, current_data
 	"""
 	This function runs in a	background thread.
 	It continuously	grabs frames from the camera
@@ -782,9 +803,6 @@ def	camera_loop():
 	cap.set(cv2.CAP_PROP_FRAME_WIDTH, current_setting_resolution[0])
 	cap.set(cv2.CAP_PROP_FRAME_HEIGHT, current_setting_resolution[1])
 	cap.set(cv2.CAP_PROP_FPS, frame_rate)
-
-	udp_thread = threading.Thread(target=udp_server, daemon=True)
-	udp_thread.start()
 	is_calibrating = False
 
 	while not stop_camera_thread:
@@ -815,8 +833,10 @@ def	camera_loop():
 				frame, detections =	detector_superimpose(
 					frame, at_detector,	0.0115582191781, camera_indices[current_camera_index]
 				)
-				send_udp_data(detections)
-
+				if detections:
+					current_data = detections
+				else:
+					current_data = None
 			resized	= cv2.resize(frame,	(1280, 720))
 			# cv2.imshow(stream.name, resized)
 			if change_camera_flag:

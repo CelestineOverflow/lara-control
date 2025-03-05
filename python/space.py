@@ -4,12 +4,25 @@ from typing import List, Tuple
 import numpy as np
 
 
+def deg2rad(deg):
+	return deg * np.pi / 180
+
+def scale_values(x, y):
+   # Find the maximum absolute value
+   max_abs = max(abs(x), abs(y))
+   # If max_abs is 0, we can't scale (would cause division by zero)
+   if max_abs == 0:
+       return 0, 0
+   # Scale both values proportionally
+   scaled_x = x / max_abs
+   scaled_y = y / max_abs
+   return scaled_x, scaled_y
 
 class Vector3:
-   def __init__(self, x: float, y: float, z: float):
-       self.x = x
-       self.y = y
-       self.z = z
+   def __init__(self, x, y, z):
+        self.x = float(x)
+        self.y = float(y)
+        self.z = float(z)
    def to_list(self) -> List[float]:
        return [self.x, self.y, self.z]
    def __str__(self):
@@ -430,15 +443,36 @@ class Pose():
             "orientation": self.orientation.to_list()
         }
     
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict())
+
     @staticmethod
     def from_json(data) -> 'Pose':
-        return Pose(
-            position=Vector3(*data['position']),
-            orientation=Quaternion(*data['orientation'])
-        )
+        # Parse JSON string if data is a string
+        if isinstance(data, str):
+            data = json.loads(data)
+        
+        position_data = data['position']
+        orientation_data = data['orientation']
+        
+        # Handle position and orientation as dictionaries
+        if isinstance(position_data, dict):
+            position = Vector3(position_data['x'], position_data['y'], position_data['z'])
+        else:
+            position = Vector3(*position_data)
+            
+        if isinstance(orientation_data, dict):
+            orientation = Quaternion(orientation_data['x'], orientation_data['y'], orientation_data['z'], orientation_data['w'])
+        else:
+            orientation = Quaternion(*orientation_data)
+            
+        return Pose(position=position, orientation=orientation)
+
     
     def to_Cartesian(self) -> PoseCartesian:
         return PoseCartesian(self.position, self.orientation.to_euler())
     
     def __str__(self):
         return f"Position: {self.position}, Orientation: {self.orientation}"
+    

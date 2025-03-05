@@ -19,7 +19,7 @@ import threading
 import time
 import queue
 import logging
-
+import traceback
 # --- Global variables ---
 
 serial_handler = None
@@ -33,10 +33,15 @@ stop_event = threading.Event()
 lara : Lara	= None
 offset_x = 3.4
 logging.getLogger('lara').setLevel(logging.ERROR)
-
 error_queue = queue.Queue()
 warning_queue = queue.Queue()
-
+is_paused =	False
+force =	0.0
+threshold_default = 1000.0 # Default threshold value for force
+threshold_press = 10000.0 # Threshold value for force to trigger fine adjustment
+threshold =	threshold_default
+unblock_pressure_flag = False
+autonomous_control_flag = False
 
 def emit_error(error_code: int, error_message: str):
 	error_queue.put((error_code, error_message))
@@ -45,7 +50,7 @@ def emit_warning(warning_code: int, warning_message: str):
 	warning_queue.put((warning_code, warning_message))
 
 def	reader():
-	global serial_handler, json_data, json_data_consumed, first_data_json
+	global serial_handler, json_data, json_data_consumed, first_data_json, threshold, force, lara, unblock_pressure_flag
 	serial_handler.write('{"connected":	1}')
 	flag_error_sent = False
 	flag_warning_sent = False
@@ -74,6 +79,10 @@ def	reader():
 					else:
 						flag_error_sent = False
 						flag_warning_sent = False
+					if unblock_pressure_flag:
+						if force <(threshold_default/2):
+							unblock_pressure_flag = False
+							threshold = threshold_default
 				# else:
 				# 	lara.robot.unpause()
 				# 	if lara.collided:
@@ -138,9 +147,7 @@ class GenerateTrayRequest(BaseModel):
 def	read_root():
 	return RedirectResponse(url="/docs")
 
-is_paused =	False
-threshold =	10000.0
-force =	0.0
+
 
 active_websockets = []
 
@@ -159,11 +166,11 @@ async def broadcast(message: dict):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-	global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json
+	global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json, autonomous_control_flag
 	counter = 0
 	await websocket.accept()
 	active_websockets.append(websocket)
-	
+	last_time = current_milli_time()
 	# Send the first data json to all clients
 	if first_data_json:
 		print("Sending first data json: " + str(first_data_json))
@@ -192,8 +199,9 @@ async def websocket_endpoint(websocket: WebSocket):
 						"warning_message": warning[1]
 					}
 				})
-			
-			await asyncio.sleep(0.01)
+			if current_milli_time() - last_time > 500:
+				await broadcast({"autonomous_control": autonomous_control_flag})
+				last_time = current_milli_time()
 	except Exception as e:
 		print("Websocket exception:", e)
 	finally:
@@ -263,6 +271,13 @@ except FileNotFoundError:
 	pass
 except json.JSONDecodeError:
 	print("Invalid JSON	in config.json")
+
+
+@app.post("/setAutonomousControl")
+def set_autonomous_control(autonomous_control: bool):
+	global autonomous_control_flag
+	autonomous_control_flag = autonomous_control
+	return {"autonomous_control": autonomous_control_flag}
 
 @app.post("/setSocket")
 def	set_socket():
@@ -391,12 +406,15 @@ def	tare():
 
 @app.post("/retract")
 def	retract(distance = -0.15):
-	global lara, socket_pose, json_data
+	global lara, socket_pose, json_data, threshold, threshold_default, unblock_pressure_flag
 	#if the value is not negative then throw an error
 	distance = float(distance)
 	if distance >= 0.0:
 		return {"error": "Distance must be negative"}
 	lara.retract(distance)
+	threshold = threshold_default
+	unblock_pressure_flag = False
+	return {"success": "Retracted"}
 
 @app.post("/moveToCellRetract")
 def	move_to_cell_retract(row: int =	0, col:	int	= 0):
@@ -412,149 +430,302 @@ def	get_offset():
 @app.post("/moveToSocketRetract")
 async def move_to_socket_retract():
 	global lara, socket_pose, json_data
-	await lara.set_translation_speed_mms(4)
-	await lara.set_rotation_speed_degs(1)
-	lara.move_to_pose_tag_from_retract(socket_pose)
-	loop = asyncio.get_running_loop()
-	def blocking_call():
-		return requests.post(
-			'http://192.168.2.209:1447/AlignToTag',
-			params={'offsetx': offset_x, 'offsety': 0},
-			headers={'accept': 'application/json'}
-		)
-	response = await loop.run_in_executor(None, blocking_call)
-	print(f"Response from AlignToTag: {response.text}")
-	#set the current pose as the socket pose
-	set_socket()
+	try:
+		lara.move_to_pose_tag_from_retract(socket_pose)
+		await lara.set_translation_speed_mms(4)
+		await lara.set_rotation_speed_degs(1)
+		loop = asyncio.get_running_loop()
+		def blocking_call():
+			return requests.post(
+				'http://192.168.2.209:1447/AlingMove',
+				headers={'accept': 'application/json'}
+			)
+		response = await loop.run_in_executor(None, blocking_call)
+		#check for errors in json response
+		response_json = response.json()
+		if "error" in response_json:
+			#Response from AlignToTag: {"error":"No data received from the camera"}
+			return response_json
+		print(f"Response from AlignToTag: {response.text}")
+		set_socket()
+	except Exception as e:
+		return {"error": f"Error during first-time socket move: {str(e)}"}
 
 
+
+
+async def get_camera_pose() -> Pose:
+	"""
+	Makes a request to get the camera pose data from the camera server.
+	Uses run_in_executor to handle the blocking HTTP request asynchronously.
+	
+	Returns:
+		dict: The pose data containing position and orientation information.
+	"""
+	try:
+		loop = asyncio.get_running_loop()
+		def blocking_request():
+			return requests.get(
+				'http://192.168.2.209:1447/get_pose',
+				headers={'accept': 'application/json'}
+			)
+		
+		response = await loop.run_in_executor(None, blocking_request)
+		response.raise_for_status()  # Raise an exception for error status codes
+		response_data = response.json()
+		print(f"Camera pose response: {response_data}")
+		# {'pose': {'position': {'x': 0.002536922718224708, 'y': 0.0016317179141842983, 'z': 0.14855312461243356}, 'orientation': {'x': -0.14951492301593602, 'y': -0.0028587180024886062, 'z': -0.0008303562976694001, 'w': 0.988754987868754}}}
+		pose = Pose.from_json(response_data["pose"])
+		return pose
+	except Exception as e:
+		error_traceback = traceback.format_exc()
+		print(f"Error in get_camera_pose:\n{error_traceback}")
+		emit_error(1, f"Error in get_camera_pose: {str(e)}")
+		return None
+	
+firstTimeSocketMove = True
+tag_pose : Pose = None
 
 
 @app.post("/moveToSocket")
 async def move_to_socket():
-	global lara, socket_pose, json_data, offset_x
-	lara.move_to_pose_tag(socket_pose)
-	await lara.set_translation_speed_mms(4)
-	await lara.set_rotation_speed_degs(1)
-	loop = asyncio.get_running_loop()
-
-	def blocking_call():
-		return requests.post(
-			'http://192.168.2.209:1447/AlignToTag',
-			params={'offsetx': offset_x, 'offsety': 0},
-			headers={'accept': 'application/json'}
-		)
-
-	response = await loop.run_in_executor(None, blocking_call)
-	print(f"Response from AlignToTag: {response.text}")
-	#set the current pose as the socket pose
-	set_socket()
-@app.post("/mock_up_move")
-async def mock_up_move():
-	await lara.start_movement_slider(0,	0, 0, 0, 0, 0)
-
+	global lara, socket_pose, json_data, firstTimeSocketMove, tag_pose
+	# try:
+		# if firstTimeSocketMove:
+			# First time initialization
+	try:
+		lara.move_to_pose_tag(socket_pose)
+		await lara.set_translation_speed_mms(4)
+		await lara.set_rotation_speed_degs(1)
+		loop = asyncio.get_running_loop()
+		def blocking_call():
+			return requests.post(
+				'http://192.168.2.209:1447/AlingMove',
+				headers={'accept': 'application/json'}
+			)
+		response = await loop.run_in_executor(None, blocking_call)
+		response.raise_for_status()  # Add this to check for HTTP errors
+		print(f"Response from AlignToTag: {response.text}")
+		set_socket()
+		firstTimeSocketMove = False
+		return {"status": "First-time socket move completed successfully"}
+	except Exception as e:
+		emit_error(1, f"Error during first-time socket move: {str(e)}")
+		return {"error": f"Error during first-time socket move: {str(e)}"}
 
 @app.post("/moveUntilPressure")
-async def move_until_pressure(pressure:	float =	1000.0,	wiggle_room: float = 300.0):
-	global lara, json_data,	threshold, force, is_paused
-	start_position = lara.pose.position	# Store	the	start position
-	await lara.set_translation_speed_mms(1)
-	move_z = -1 # Direction	to move	in
-	MAX_DEPTH =	0.010 #	10mm or 0.01m
-	# Move the robot down until	the	force exceeds the threshold	or the maximum depth is reached
-	await asyncio.sleep(1)
-	print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
-	lara.robot.turn_on_jog(
-		jog_velocity=[0, 0, move_z,	0, 0, 0], 
-		jog_type='Cartesian'
-	)
-	for	i in range(1000):
-		print(f"height:	{lara.pose.position.z *	1000} mm")
-		if lara.pose.position.z	- start_position.z < -MAX_DEPTH:
-			break
-		# check	if the force exceeds the threshold
-		if force > pressure	+ wiggle_room:
-			break
-		if json_data is not	None:
-			if "force" in json_data:
-				force =	float(json_data["force"])
-				print(f"Current	force: {force}")
-				if force > pressure	+ wiggle_room:
-					print(f"Force {force} exceeds pressure {pressure} +	wiggle_room	{wiggle_room}. Breaking	loop.")
-					break
-		lara.robot.jog(set_jogging_external_flag = 1)
-		await asyncio.sleep(0.001)
-		if i == 999:
-			lara.robot.turn_off_jog()
-			return {"error": "Force	did	not	exceed threshold within	1000 iterations."}
-	lara.robot.turn_off_jog()
-	print("Stopped all movements.")
-
-
-
-@app.post("/testJog")
-async def testJog():
-	global lara, json_data,	threshold, force, is_paused
-	start_position = lara.pose.position	# Store	the	start position
-	await lara.setTranslationSpeedMMs(0.5)
-	move_z = -1 # Direction	to move	in
-	MAX_DEPTH =	0.010 #	10mm or 0.01m
-	await asyncio.sleep(1)
-
-	print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
-
-	for	k in range(100):
-		#go	down 10mm
-		print(f"height:	{lara.pose.position.z *	1000} mm")
-		for	i in range(10):
-			print(f"down")
-			lara.robot.turn_on_jog(
-			jog_velocity=[0, 0, move_z,	0, 0, 0], 
-			jog_type='Cartesian'
-			)
-			lara.robot.jog(set_jogging_external_flag = 1)
-			await asyncio.sleep(0.1)
-			move_z = -move_z#
-		#go	up 10mm
+async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 50.0):
+	global lara, json_data, threshold, force, threshold_press, unblock_pressure_flag
+	error = None
+	current_force = 0
+	threshold = threshold_press
+	try:
+		# Store starting position
+		start_position = lara.pose.position
+		await lara.set_translation_speed_mms(1)
+		MAX_DEPTH = 0.010  # 10mm or 0.01m
 		
-		for	i in range(10):
-			print(f"up")
-			lara.robot.turn_on_jog(
-				jog_velocity=[0, 0, -move_z, 0, 0, 0], 
-				jog_type='Cartesian'
-			)
+		# First stage: Move down continuously until near target pressure
+		print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
+		lara.robot.turn_on_jog(
+			jog_velocity=[0, 0, -1, 0, 0, 0],  # Downward movement
+			jog_type='Cartesian'
+		)
+		
+		# Continue moving until within range of target pressure
+		for i in range(1000):
+			print(f"Height: {lara.pose.position.z * 1000} mm")
+			
+			# Check maximum depth for safety
+			if lara.pose.position.z - start_position.z < -MAX_DEPTH:
+				print("Maximum depth reached")
+				break
+				
+			# Check if we have force data
+			if json_data is not None and "force" in json_data:
+				current_force = float(json_data["force"])
+				print(f"Current force: {current_force}")
+				
+				# Stop when we get close to target pressure
+				if current_force > (pressure - wiggle_room):
+					print(f"Initial pressure target reached: {current_force}")
+					break
+					
+			# Continue jogging down
 			lara.robot.jog(set_jogging_external_flag = 1)
-			await asyncio.sleep(0.1)
-	lara.robot.turn_off_jog()
-	print("Stopped all movements.")
+			await asyncio.sleep(0.01)
+			
+			# Safety timeout
+			if i == 999:
+				lara.robot.turn_off_jog()
+				emit_error(1, error)
+				threshold = threshold_default
+				return {"error": "Could not reach target pressure within movement limit"}
+		
+		# Turn off jog before considering next steps
+		lara.robot.turn_off_jog()
+		
+		# Only do fine adjustment if pressure is above threshold (3000)
+		if pressure >= 3000:
+			print(f"Pressure target {pressure} >= 3000, performing fine adjustment")
+			return_val = await fine_adjust_pressure(pressure, wiggle_room)
+			unblock_pressure_flag = True
+			return return_val
+		else:
+			print(f"Pressure target {pressure} < 3000, skipping fine adjustment")
+			unblock_pressure_flag = True
+			return {"success": f"Initial pressure reached {current_force} (fine adjustment skipped)"}
 
-
-@app.post("/testJog2")
-async def testJog2():
-	global lara, json_data,	threshold, force, is_paused
-	start_position = lara.pose.position	# Store	the	start position
-	await lara.setTranslationSpeedMMs(0.5)
-	move_z = -1 # Direction	to move	in
-	MAX_DEPTH =	0.010 #	10mm or 0.01m
-	await asyncio.sleep(1)
-
-	print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
-
-	for	i in range(1000):
-		print(f"height:	{lara.pose.position.z *	1000} mm")
-		if lara.pose.position.z	- start_position.z < -MAX_DEPTH:
-			print("Max depth reached")
-			break
-		await lara.start_movement_slider(0,	0, move_z, 0, 0, 0)
-		await asyncio.sleep(0.01)
-		move_z = -move_z
-	await lara.stop_movement_slider(0, 0, 0, 0, 0, 0)
-	print("Stopped all movements.")
+	except Exception as e:
+		error = str(e)
+		print(f"Error in moveUntilPressure: {error}")
+		threshold = threshold_default
+	finally:
+		lara.robot.turn_off_jog()
+		if error:
+			emit_error(1, error)
+			return {"error": error}
+		unblock_pressure_flag = True
+		return {"success": f"Pressure reached {current_force}"}
+	
+async def fine_adjust_pressure(pressure: float = 1000.0, wiggle_room: float = 50.0):
+	global lara, json_data
+	error = None
+	try:
+		print(f"Starting fine pressure adjustment to target {pressure}±{wiggle_room}")
+		await lara.set_translation_speed_mms(1)
+		
+		# Track consecutive readings within threshold to ensure stability
+		stable_count = 0
+		required_stable_readings = 10  # Number of consecutive readings needed to confirm stability
+		current_force = 0
+		
+		for i in range(200):  # Maximum iterations
+			if json_data is not None and "force" in json_data:
+				current_force = float(json_data["force"])
+				print(f"Current force: {current_force}, target: {pressure}±{wiggle_room}")
+				
+				if current_force < pressure - wiggle_room:
+					# Too little pressure, move down
+					print("Pressure too low - moving down")
+					lara.robot.turn_on_jog(
+						jog_velocity=[0, 0, -0.2, 0, 0, 0],  # Slow downward
+						jog_type='Cartesian'
+					)
+					lara.robot.jog(set_jogging_external_flag = 1)
+					stable_count = 0
+				elif current_force > pressure + wiggle_room:
+					# Too much pressure, move up
+					print("Pressure too high - moving up")
+					lara.robot.turn_on_jog(
+						jog_velocity=[0, 0, 0.2, 0, 0, 0],  # Slow upward
+						jog_type='Cartesian'
+					)
+					lara.robot.jog(set_jogging_external_flag = 1)
+					stable_count = 0
+				else:
+					# Within threshold, increase stable count
+					print(f"Within threshold, stable count: {stable_count}/{required_stable_readings}")
+					lara.robot.turn_off_jog()
+					stable_count += 1
+					if stable_count >= required_stable_readings:
+						print("Pressure stabilized within threshold")
+						break
+				
+				await asyncio.sleep(0.01)
+				
+			if i == 199:
+				error = "Failed to stabilize pressure within maximum iterations"
+	except Exception as e:
+		error = str(e)
+		print(f"Error during pressure adjustment: {error}")
+	finally:
+		lara.robot.turn_off_jog()
+		if error:
+			return {"error": error}
+		return {"success": f"Force stabilized at {current_force} (target: {pressure}±{wiggle_room})"}
 
 @app.post("/EmergencyStop")
-def	emergency_stop():
+def emergency_stop():
 	global lara
 	lara.robot.power('off')
+	emit_warning(1, "Emergency stop triggered")
+	return {"success": "Emergency stop"}
+
+
+@app.post("/zero_rotation")
+async def zero_rotation():
+	global lara
+	import socketio
+	sio = socketio.AsyncClient(logger=False, engineio_logger=False)
+	await sio.connect('http://192.168.2.13:8081')
+	async def heart_beat(*args, **kwargs):
+		await sio.emit('heartbeat_response', True)
+		print("Heartbeat response")
+	sio.on('heartbeat_check', heart_beat)
+	print()
+	# Target: {'x': 3.1415795473339365, 'y': -5.071154926206134e-06, 'z': 9.237616908519541e-06}
+	
+	# Define wiggle room for float comparisons
+	wiggle_room = 0.01
+	
+	while True:
+		current_pose = lara.current_pose_raw()
+		euler = current_pose.orientation.to_euler()
+		
+		# Check if orientation is close to target values
+		# x should be close to pi, y and z close to 0
+		if (abs(euler.x - 3.14159) < wiggle_room and 
+			abs(euler.y) < wiggle_room and 
+			abs(euler.z) < wiggle_room):
+			break
+			
+		await sio.emit('CartesianGotoManual', {
+			"x": current_pose.position.x,
+			"y": current_pose.position.y,
+			"z": current_pose.position.z,
+			"a": 3.141593,
+			"b": 0,
+			"c": 0,
+			"status": True,
+			"joint": False,
+			"cartesian": True,
+			"freedrive": False,
+			"button": False,
+			"slider": False,
+			"goto": True,
+			"threeD": False,
+			"reference": "Base",
+			"absrel": "Absolute"
+		})
+		await asyncio.sleep(1)
+	
+	# stop the robot
+	await sio.emit('CartesianGotoManual', {
+		"x": 0,
+		"y": 0,
+		"z": 0,
+		"a": 0,
+		"b": 0,
+		"c": 0,
+		"status": False,
+		"joint": False,
+		"cartesian": False,
+		"freedrive": False,
+		"button": False,
+		"slider": False,
+		"goto": False,
+		"threeD": False,
+		"reference": "Base",
+		"absrel": "Absolute"
+	})
+
+	# Close the connection
+	await sio.disconnect()
+	return {"success": "Zeroed rotation"}
+	
+
+
 
 @app.post("/togglePump")
 def	toggle_pump(boolean	: bool):
@@ -584,13 +755,6 @@ def	get_orientation_data():
 	orientation	= lara.pose.orientation.to_euler().to_dict(degrees=True)
 	return orientation
 
-
-@app.post("/get_camera_data")
-def	get_camera_data():
-	global udp_server
-	data = udp_server.receive_data()
-	return {"data":	data}
-
 @app.post("/setBrightness")
 def	set_brightness(newBrightness : int):
 	global serial_handler
@@ -609,6 +773,12 @@ def	setHeater(newHeat :	int):
 	serial_handler.write(f'{{"setTemp":	{newHeat}}}')
 	return {"setTemp": newHeat}
 
+@app.get("/getJointTorques")
+def	get_joint_torques():
+	global lara
+	torques =  lara.robot.get_current_joint_torques()
+	return {"torques": torques}
+
 
 @app.post("/TurnJogOff")
 def	turn_jog_off():
@@ -619,6 +789,5 @@ if __name__	== "__main__":
 	import uvicorn
 	import threading
 	import requests
-	
 	uvicorn.run(app, host=ip, port=1442)
 		

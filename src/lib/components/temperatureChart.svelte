@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { temperature } from "$lib/coordinate";
   import ChartWorker from './ChartWorker.ts?worker'; // or wherever your worker is
+    import TorqueChart from "./TorqueChart.svelte";
 
   let canvas: HTMLCanvasElement;
   let dataIndex = 0;
@@ -55,7 +56,7 @@
 </script>
 
 <!-- HTML Layout -->
-<div class="bg-gray-800 text-white h-full flex flex-col p-4 round">
+<div class="bg-gray-800 text-white h-full flex flex-col p-4 round" >
   <h2 class="text-2xl text-white font-bold text-right">Temperature</h2>
   <h2 class="text-xl text-gray-400 font-bold text-right">
     Heater: {heater_percentage} | 

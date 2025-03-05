@@ -2,6 +2,7 @@
     import { connectApi, robotJoints} from "$lib/coordinate";
     import { onMount } from "svelte";
     onMount(() => {
+
         connectApi();
     });
     let toggle = "";

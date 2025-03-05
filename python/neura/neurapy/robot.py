@@ -21,7 +21,7 @@ else :
 
 VERSION = "v4.11.0-alpha.74"
     
-LOGLEVEL = os.getenv('NEURAPY_LOG_LEVEL', 'DEBUG')
+LOGLEVEL = os.getenv('NEURAPY_LOG_LEVEL', 'WARNING')
 
 MONITOR_CYCLE_TIME = 0.05
 
@@ -92,7 +92,10 @@ def generate_function(function_name, address):
         sock.close()
         response = json.loads(new_data.decode("utf-8"))
         if response["error"]:
-            self.logger.error(f"{function_name} call with args {args}, {kwargs}, failed with exception {response['error']}")
+            if "Not Enough Points in Target" in response["error"]:
+                self.logger.warning(f"{function_name} called with args {args}, {kwargs} returned warning: {response['error']}")
+            else:
+                self.logger.error(f"{function_name} call with args {args}, {kwargs} failed with exception {response['error']}")
             raise Exception(response["error"])
         return response["result"]
 
@@ -207,7 +210,7 @@ class Robot:
         self.logger.info(f"Robot initialized with following functions {self.__functions} and robot version {self.version}")
         if self.version != VERSION:
             self.logger.warning("Current client version is not compatiable with the version of the server running on the robot. Some of the functionlities specified in the documentation might not work in the intended way. Please upgrade to the correct version .Client Version : {VERSION},Server Version : {self.version}")
-        #self.start_diagnostics_monitor()
+        self.start_diagnostics_monitor()
         
     def help(self, name):
         print(self.get_doc(name))
@@ -219,7 +222,7 @@ class Robot:
             if "critical" in diagnostics:
                 if diagnostics["critical"]:
                     COUNTER += 1
-                    if COUNTER > 1000:
+                    if COUNTER > 10000:
                         self.logger.error(f"{diagnostics}")
                         COUNTER = 0
             time.sleep(MONITOR_CYCLE_TIME)

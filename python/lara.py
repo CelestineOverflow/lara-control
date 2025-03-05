@@ -48,6 +48,7 @@ class Lara:
 		self.current_linear_speed = None # Meters
 		self.current_rotation_speed = None # Rads
 
+
 	async def report_error(self, data):
 		print(f"Error: {data}")
 	async def __set_joint_angle(self, data) -> None:
@@ -93,6 +94,19 @@ class Lara:
 	async def on_disconnect(self):
 		print('disconnected from	server')
 
+	def rot_speed_deg_is_close_to_current(self, deg_s, tol=0.1):
+		current_rad = self.current_rotation_speed
+		target_rad = deg_s * 0.0174533
+		diff = abs(current_rad - target_rad)
+		print("----- DEBUG: rot_speed_deg_is_close_to_current -----")
+		print(f"Current rotation speed (rad/s): {current_rad}")
+		print(f"Target rotation speed (rad/s): {target_rad}")
+		print(f"Difference: {diff} (tolerance: {tol})")
+		print("------------------------------------------------------")
+		return diff < tol
+	
+
+
 	async def send_hearbeat_response(self, *args):
 		"""Send a heartbeat response to request."""
 		# print("Sending heartbeat.")
@@ -116,8 +130,9 @@ class Lara:
 				json={"linearVelocity": speed}
 			) as response:
 				logging.info(await response.text())
+		await asyncio.sleep(0.2)
 		await self.sio.emit("linearveltrigger", {"data":	True})
-		await asyncio.sleep(0.5)
+		await asyncio.sleep(0.2)
 		
 	
 	async def set_rotation_speed(self, speed):
@@ -136,7 +151,9 @@ class Lara:
 				json={"rotationSpeed": speed}
 			) as response:
 				logging.info(await response.text())
+		await asyncio.sleep(0.2)
 		await self.sio.emit("linearveltrigger", {"data":	True})
+		await asyncio.sleep(0.2)
 		
 	def setRotSpeedDegSNoAsync(self, deg_s):
 		rad_s = deg_s * 0.0174533
@@ -157,34 +174,45 @@ class Lara:
 		rad_s = deg_s * 0.0174533
 		print(f"Setting rotational speed to {rad_s} rad/s or {deg_s} deg/s")
 		await self.set_rotation_speed(rad_s)
-		
-	async def start_movement_slider(self, q0, q1, q2, q3, q4, q5):
-		"""
-		Called roughly every	0.5s to move the slider.
-		We update the last_slider_call time here	to let
-		our background task know	we are still active.
-		"""
-		if not self.started_movement_slider:
-			self.started_movement_slider = True
-			response = requests.get("http://192.168.2.13:8081/api/cartesian")
-			data = response.json()
-			print(f"Cartesian Pose fetched: {data}")
-		self.last_slider_call = time.time()	# track	the	call time
-		data= {
-		'q0': q0, 'q1': q1, 'q2': q2, 'q3': q3, 'q4': q4, 'q5': q5,
-		'status': True, 'joint':	False, 'cartesian':	True, 'freedrive': False,
-		'button': False,	'slider': True,	'goto':	False, 'threeD': False,
-		'reference':	"Base",	'absrel': "Absolute",
+	async def start_movement_slider(self,q0, q1, q2, q3, q4, q5):
+		data = {
+			'q0': q0,
+			'q1': q1,
+			'q2': q2,
+			'q3': q3,
+			'q4': q4,
+			'q5': q5,
+			'status': True,
+			'joint': False,
+			'cartesian': True,
+			'freedrive': False,
+			'button': False,
+			'slider': True,
+			'goto': False,
+			'threeD': False,
+			'reference': "Base",
+			'absrel': "Absolute",
 		}
 		await self.sio.emit('CartesianSlider', data)
 		
-	async def stop_movement_slider(self,	q0,	q1,	q2,	q3,	q4,	q5):
-		self.started_movement_slider = False
-		data	= {
-			'q0': q0, 'q1': q1, 'q2': q2, 'q3': q3, 'q4': q4, 'q5': q5,
-			'status': False,	'joint': False,	'cartesian': True, 'freedrive':	False,
-			'button': False,	'slider': True,	'goto':	False, 'threeD': False,
-			'reference':	"Base",	'absrel': "Absolute",
+	async def stop_movement_slider(self, q0, q1, q2, q3, q4, q5):
+		data = {
+			'q0': q0,
+			'q1': q1,
+			'q2': q2,
+			'q3': q3,
+			'q4': q4,
+			'q5': q5,
+			'status': False,
+			'joint': False,
+			'cartesian': True,
+			'freedrive': False,
+			'button': False,
+			'slider': True,
+			'goto': False,
+			'threeD': False,
+			'reference': "Base",
+			'absrel': "Absolute",
 		}
 		await self.sio.emit('CartesianSlider', data)
 
@@ -357,6 +385,17 @@ class Lara:
 			pose.position.z + offset_global[2]
 		)
 		steps.append(PoseCartesian(position=new_position, orientation=pose.orientation.to_euler(order="xyz")))
+		self.__move_to_steps(steps)
+
+	def move_from_current_direct(self, pose: Pose):
+		'''
+		Moves to tag pose, to be used only with retract movement before hand
+		'''
+		# First step: use the current pose (retracted)
+		steps = []
+		steps.append(self.current_pose())
+		# Second step is target position + offset
+		steps.append(PoseCartesian(position=pose.position, orientation=pose.orientation.to_euler(order="xyz")))
 		self.__move_to_steps(steps)
 
 	
