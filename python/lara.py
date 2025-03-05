@@ -13,6 +13,11 @@ logging.getLogger('socketio').setLevel(logging.ERROR)
 logging.getLogger('engineio').setLevel(logging.ERROR)
 logging.basicConfig(level=logging.ERROR)
 
+from websockets.sync.client import connect
+import json		
+link = "ws://192.168.2.209:8082"
+		
+
 
 
 
@@ -524,6 +529,47 @@ class Lara:
 			"connection": self.robot.connection,
 			"version": self.robot.version
 		}
+	
+	def send_echo(self, message="Echo received"):
+		data_echo = {
+			"command": "echo",
+			"message": message
+		}
+		global link
+		with connect(link) as websocket:
+			websocket.send(json.dumps(data_echo))
+			reply = websocket.recv()
+			print(f"Echo reply: {reply}")
+
+	def stopMoving(self):
+		data_stop_moving = {
+			"command": "stopMoving"
+		}
+		global link
+		with connect(link) as websocket:
+			websocket.send(json.dumps(data_stop_moving))
+			reply = websocket.recv()
+			print(f"Stop moving reply: {reply}")
+
+	
+	def start_moving(self, q0=0, q1=0, q2=0, q3=0, q4=0, q5=0, absrel="Absolute", reference="Base"):
+		global link
+		data_start_moving = {
+			"command": "startMoving",
+			"q0": q0,
+			"q1": q1,
+			"q2": q2,
+			"q3": q3,
+			"q4": q4,
+			"q5": q5,
+			"absrel": absrel,
+			"reference": reference
+		}
+		with connect(link) as websocket:
+			websocket.send(json.dumps(data_start_moving))
+			reply = websocket.recv()
+			print(f"Start moving reply: {reply}")
+
 
 if __name__	== "__main__":
 	import asyncio

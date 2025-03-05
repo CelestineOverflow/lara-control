@@ -1,216 +1,380 @@
 <script lang="ts">
-    import { onMount, onDestroy } from "svelte";
+    import { setTranslationSpeed, max_rotation_speed, max_translation_speed, setRotationalSpeed } from "$lib/robotics/laraapi";
+    import { robotJoints } from "$lib/coordinate";
+    import {  radToDeg } from "three/src/math/MathUtils.js";
     import * as THREE from "three";
-    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-    import { RectAreaLightHelper } from "three/examples/jsm/helpers/RectAreaLightHelper.js";
-    import ThreeMeshUI from "three-mesh-ui";
-    import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-    import { moveCartesian, setupSocket } from "$lib/robotics/laraapi";
-    let ws: WebSocket;
-    let ws_url = "ws://192.168.2.209:4245";
-    let incoming_data: any;
-    let update_from_server = true;
-    //Enviroment Variable
-    let canvas: HTMLCanvasElement;
-    let scene: THREE.Scene;
-    let camera: any;
-    let renderer: THREE.WebGLRenderer;
-    let animationId: number;
-    let controls: OrbitControls;
-    let resizeObserver: ResizeObserver;
-    let container: HTMLDivElement;
-    let transformControls : TransformControls;
-    let clock: THREE.Clock;
-    let stream: MediaStream | null = null;
-    const position = new THREE.Vector3();
-    const rotation = new THREE.Quaternion();
+    import { onMount } from "svelte";
+    
+    import socketIOClient from 'socket.io-client';
+    let socket: any;
+    export function setupSocket() {
+    socket = socketIOClient("http://192.168.2.13:8081");
 
-    function moveTo(vector: THREE.Vector3) {
-        // Send the new position to the server
-        const data = {
-            type: 'move',
-            position: {
-                x: vector.x,
-                y: vector.y,
-                z: vector.z
-            }
-        };
-        ws.send(JSON.stringify(data));
-    }
+     
+    socket.on("connect", async () => {
+        console.log(`Connected with socket ID: ${socket.id}`);
+        console.log("Connected and emitted events.");
+    });
 
-    // function update(vector: THREE.Vector3){
-    //     // Send the new position to the server
-    //     // const data = {
-    //     //     type: 'update',
-    //     //     position: {
-    //     //         x: vector.x,
-    //     //         y: vector.y,
-    //     //         z: vector.z
-    //     //     }
-    //     // };
-    //     // if(ws){
-    //     //     ws.send(JSON.stringify(data));
-    //     // }
-    //     moveCartesian(vector.x, vector.y, vector.z);
-    // }
-    function addLights() {
-        const light0 = new THREE.PointLight(0xff0000, 4, 100);
-        light0.position.set(0, 1, 0);
-        scene.add(light0);
-        const light1 = new THREE.PointLight(0x00ff00, 4, 100);
-        light1.position.set(2, 1, 0);
-        scene.add(light1);
-        const light2 = new THREE.PointLight(0x0000ff, 4, 100);
-        light2.position.set(0, 1, 2);
-        scene.add(light2);
-        scene.add(new THREE.AmbientLight(0x404040, 5));
-        const rectLight1 = new THREE.RectAreaLight(0xff0000, 5, 4, 10);
-        rectLight1.position.set(-5, 5, 5);
-        scene.add(rectLight1);
-        const rectLight2 = new THREE.RectAreaLight(0x00ff00, 5, 4, 10);
-        rectLight2.position.set(0, 5, 5);
-        scene.add(rectLight2);
-        const rectLight3 = new THREE.RectAreaLight(0x0000ff, 5, 4, 10);
-        rectLight3.position.set(5, 5, 5);
-        scene.add(rectLight3);
-        scene.add(new RectAreaLightHelper(rectLight1));
-        scene.add(new RectAreaLightHelper(rectLight2));
-        scene.add(new RectAreaLightHelper(rectLight3));
-    }
+    socket.on("heartbeat_check", () => {
+        socket.emit("heartbeat_response", true);
+    });
+
+    //Cartesian_Pose
+    socket.on("Cartesian_Pose", (data: any) => {
+        robotJoints.update((joints) => {
+            const x = parseFloat(data.X);
+            const y = parseFloat(data.Y);
+            const z = parseFloat(data.Z);
+            const a = parseFloat(data.A);
+            const b = parseFloat(data.B);
+            const c = parseFloat(data.C);
+            const _x = parseFloat(data._X);
+            const _y = parseFloat(data._Y);
+            const _z = parseFloat(data._Z);
+            const _w = parseFloat(data._W);
+            if (!isNaN(x)) joints.x = x;
+            if (!isNaN(y)) joints.y = y;
+            if (!isNaN(z)) joints.z = z;
+            if (!isNaN(a)) joints.a = a;
+            if (!isNaN(b)) joints.b = b;
+            if (!isNaN(c)) joints.c = c;
+            if (!isNaN(_x)) joints._x = _x;
+            if (!isNaN(_y)) joints._y = _y;
+            if (!isNaN(_z)) joints._z = _z;
+            if (!isNaN(_w)) joints._w = _w;
+            
+
+            return joints;
+        });
+    });
+    //Joint_Angle
+    socket.on("Joint_Angle", (data: any) => {
+        robotJoints.update((joints) => {
+            const joint1 = parseFloat(data.A1);
+            const joint2 = parseFloat(data.A2);
+            const joint3 = parseFloat(data.A3);
+            const joint4 = parseFloat(data.A4);
+            const joint5 = parseFloat(data.A5);
+            const joint6 = parseFloat(data.A6);
+            if (!isNaN(joint1) && joint1 !== undefined) joints.joint1 = joint1;
+            if (!isNaN(joint2) && joint2 !== undefined) joints.joint2 = joint2;
+            if (!isNaN(joint3) && joint3 !== undefined) joints.joint3 = joint3;
+            if (!isNaN(joint4) && joint4 !== undefined) joints.joint4 = joint4;
+            if (!isNaN(joint5) && joint5 !== undefined) joints.joint5 = joint5;
+            if (!isNaN(joint6) && joint6 !== undefined) joints.joint6 = joint6;
+            return joints;
+        });
+    });
+
+    socket.on("connect_error", (err: { message: any }) => {
+        console.error(`Connection error due to ${err.message}`);
+    });
+
+    socket.on("disconnect", (reason: any) => {
+        console.log(`Disconnected: ${reason}`);
+    });
+
+    socket.on("error", (error: any) => {
+        console.error("Socket error:", error);
+    });
+}
+
+export function setCollisionStatus(enable: boolean) {
+    const status = enable ? "on" : "off";
+    socket.emit("gui_collision_status", {
+        gui_collision: status,
+    });
+}
+
+export function startMovementSlider(q0: any, q1: any, q2: any, q3: any, q4: any, q5: any) {
+    // console.log("startMovementSlider", q0, q1, q2, q3, q4, q5);
+    let data = {
+        q0: q0,
+        q1: q1,
+        q2: q2,
+        q3: q3,
+        q4: q4,
+        q5: q5,
+        status: true,
+        joint: false,
+        cartesian: true,
+        freedrive: false,
+        button: false,
+        slider: true,
+        goto: false,
+        threeD: false,
+        reference: "Base",
+        absrel: "Absolute",
+    };
+    socket.emit("CartesianSlider", data);
+}
+
+export function stopMovementSlider(q0: any, q1: any, q2: any, q3: any, q4: any, q5: any) {
+    let data = {
+        q0: q0,
+        q1: q1,
+        q2: q2,
+        q3: q3,
+        q4: q4,
+        q5: q5,
+        status: false,
+        joint: false,
+        cartesian: true,
+        freedrive: false,
+        button: false,
+        slider: true,
+        goto: false,
+        threeD: false,
+        reference: "Base",
+        absrel: "Absolute",
+    };
+    socket.emit("CartesianSlider", data);
+}
+
+
 
     onMount(() => {
         setupSocket();
-        //init clock
-        clock = new THREE.Clock();
-        // Initialize scene
-        scene = new THREE.Scene();
+    });
 
-        // Initialize camera
-        const width = 1000;
-        const height = 1000;
-        camera = new THREE.PerspectiveCamera(75, width / height, 0.01, 1000);
-        // camera = new THREE.OrthographicCamera( width / - 2, width / 2, height / 2, height / - 2, 1, 1000 );
-        camera.position.z = 1;
-        camera.position.y = 1;
-        camera.position.x = 1;
-
-        // Initialize renderer
-        renderer = new THREE.WebGLRenderer({ canvas });
-        renderer.setSize(width, height);
-
-        // Initialize controls
-        controls = new OrbitControls(camera, renderer.domElement);
-        controls.update();
-        //add controls
-        transformControls = new TransformControls(camera, renderer.domElement);
-        transformControls.size = 0.75;
-        transformControls.space = "world";
-        scene.add(transformControls.getHelper());
-        // transformControls.addEventListener("change", ()=>{
-        //     // console.log("moved");
-        //     // update(cube.position)
-
-        // });
-        transformControls.addEventListener("mouseDown", () => {
-            controls.enabled = false;
-        });
-        transformControls.addEventListener("mouseUp", () => {
-            controls.enabled = true;
-        });
-        // Create a cube and add it to the scene
-        const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-        const material = new THREE.MeshBasicMaterial({ color: 0xf0ff0f });
-        const cube = new THREE.Mesh(geometry, material);
-        cube.position.set(-0.127,0.419,-0.52);
-        scene.add(cube);
-        transformControls.attach(cube);
-
-        // Add lights
-        addLights();
-        // add gtlf model
-        let gtlfloader = new GLTFLoader();
-        gtlfloader.load("gtlf/GeneralScene.glb", (gltf) => {
-            const model = gltf.scene;
-            scene.add(model);
-        });
-
-        ws = new WebSocket(ws_url);
-
-        ws.onopen = () => {
-            console.log("WebSocket connection opened");
-        };
-
-        ws.onmessage = (event) => {
-            try {
-                incoming_data = JSON.parse(event.data);
-                console.log(incoming_data)
-                if (incoming_data.position) {
-                    position.set(incoming_data.position.x, incoming_data.position.y, incoming_data.position.z);
-                    console.log(position)
-                }
-                if (incoming_data.quaternion) {
-                    rotation.set(incoming_data.quaternion.x, incoming_data.quaternion.y, incoming_data.quaternion.z, incoming_data.quaternion.w);
-                    console.log(rotation)
-                }
-
-            } catch (e) {
-                console.error("Error parsing JSON:", e);
-            }
-        };
-
-        ws.onclose = () => {
-            console.log("WebSocket connection closed");
-        };
-
-        ws.onerror = (error) => {
-            console.error("WebSocket error:", error);
-        };
-        let temp = 0.7;
-        let delta;
-        function animate() {
-            delta = clock.getDelta();
-            ThreeMeshUI.update();
-            // CanvasSizeHandler();
-            cube.position.lerp(position, 0.1);
-            cube.quaternion.slerp(rotation,  0.1);
-            animationId = requestAnimationFrame(animate);
-            controls.update();
-            renderer.render(scene, camera);
-            moveCartesian(cube.position.x, cube.position.y, cube.position.z);
+    let moveInterval: any = null;
+    // Toggle to move along the robot’s local (actuator’s) axes
+    let moveAlongNormal: boolean = false;
+    /**
+     * Moves the robot. For x and y moves, the z component after rotation is zeroed,
+     * but for a z move the full local transformation is applied.
+     */
+    function move(
+      axis: "x" | "y" | "z" | "a" | "b" | "c",
+      direction: 1 | -1
+    ) {
+      let movementVector = [0, 0, 0]; // [dx, dy, dz]
+      let newA = 0, newB = 0, newC = 0;
+      // Set base movement vector
+      switch (axis) {
+        case "x":
+          movementVector[0] += direction;
+          break;
+        case "y":
+          movementVector[1] += direction;
+          break;
+        case "z":
+          // For Z we always want to use the actuator’s local POV.
+          movementVector[2] += direction;
+          break;
+        case "a":
+          newA += direction;
+          break;
+        case "b":
+          newB += direction;
+          break;
+        case "c":
+          newC += direction;
+          break;
+      }
+      if (moveAlongNormal) {
+        // Retrieve the robot’s quaternion
+        let quat = new THREE.Quaternion(
+          $robotJoints._x,
+          $robotJoints._y,
+          $robotJoints._z,
+          $robotJoints._w
+        );
+        // Create a quaternion for the 180° offset around the x‑axis.
+        let offsetQuat = new THREE.Quaternion();
+        offsetQuat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
+        // Remove the offset by pre‑multiplying with the inverse.
+        quat.premultiply(offsetQuat.invert());
+        // Build a rotation matrix from the corrected quaternion.
+        let rotationMatrix = new THREE.Matrix4();
+        rotationMatrix.makeRotationFromQuaternion(quat);
+        // Extract a 3x3 matrix (for vector rotation).
+        let rotationMatrix3x3 = [
+          [rotationMatrix.elements[0], rotationMatrix.elements[1], rotationMatrix.elements[2]],
+          [rotationMatrix.elements[4], rotationMatrix.elements[5], rotationMatrix.elements[6]],
+          [rotationMatrix.elements[8], rotationMatrix.elements[9], rotationMatrix.elements[10]]
+        ];
+        // Rotate the movement vector using the corrected matrix.
+        let rotatedMovementVector = multiplyMatrixAndVector(rotationMatrix3x3, movementVector);
+        movementVector = rotatedMovementVector;
+      }
+      // Execute the movement using the (possibly rotated) movement vector.
+      startMovementSlider(
+        movementVector[0],
+        movementVector[1],
+        movementVector[2],
+        newA,
+        newB,
+        newC
+      );
+    }
+    function startMoving(
+      axis: "x" | "y" | "z" | "a" | "b" | "c",
+      direction: 1 | -1
+    ) {
+      if (moveInterval === null) {
+        move(axis, direction);
+        moveInterval = setInterval(() => move(axis, direction), 50);
+      }
+    }
+    function stopMoving() {
+      if (moveInterval !== null) {
+        clearInterval(moveInterval);
+        moveInterval = null;
+        stopMovementSlider(0, 0, 0, 0, 0, 0);
+      }
+    }
+    // Helper: multiply a 3x3 matrix with a 3-element vector.
+    function multiplyMatrixAndVector(matrix: number[][], vector: number[]): number[] {
+      let result: number[] = [];
+      for (let i = 0; i < matrix.length; i++) {
+        let sum = 0;
+        for (let j = 0; j < vector.length; j++) {
+          sum += matrix[i][j] * vector[j];
         }
-        stream = canvas.captureStream(30);
-        
-        animate();
-    });
+        result[i] = sum;
+      }
+      return result;
+    }
+    let rotational_speed = 0.0;
+    function setRotSpeed(arg0: number): void {
+      rotational_speed = (arg0 / 1000) * max_rotation_speed;
+      setRotationalSpeed(rotational_speed);
+    }
+    let linear_speed = 0.01;
+    function setTransSpeed(arg0: number): void {
+      linear_speed = (arg0 / 1000) * max_translation_speed;
+      setTranslationSpeed(linear_speed);
+    }
+   </script>
+   <!-- HTML Interface -->
+   <button
+    class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+    on:click={() => (moveAlongNormal = !moveAlongNormal)}>
+   <span>{moveAlongNormal ? "Disable" : "Enable"} Move Along Normal</span>
+   </button>
 
-    onDestroy(() => {
-        if (animationId) cancelAnimationFrame(animationId);
-        if (resizeObserver) resizeObserver.disconnect();
-
-        controls.dispose();
-        renderer.dispose();
-    });
-</script>
-
-<div
-    bind:this={container}
-    class="w-full h-800 relative"
->
-    <canvas bind:this={canvas} class="block"></canvas>
-</div>
-
-<div class="mt-4">
-    <pre class="bg-gray-100 p-4 rounded">
-        {#if incoming_data}
-            {JSON.stringify(incoming_data, null, 2)}
-        {/if}
-    </pre>
-</div>
-<button class="mt-4 px-4 py-2 bg-blue-500 text-white rounded" on:click={()=>{moveTo(new THREE.Vector3(0.5, 0.2, 0.5))}}>Move to A</button>
-<button class="mt-4 px-4 py-2 bg-blue-500 text-white rounded" on:click={()=>{moveTo(new THREE.Vector3(0.5, 0.2, -0.5))}}>Move to B</button>
-<button class="mt-4 px-4 py-2 bg-green-500 text-white rounded" on:click={() => {
-    const randomX = Math.random(); // Random value between -5 and 5
-    const randomZ = Math.random(); // Random value between -5 and 5
-    moveTo(new THREE.Vector3(randomX, 0, randomZ));
-}}>Move to Random Position</button>
+   <!-- Z+ Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("z", 1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("z", 1)}
+      on:touchend={stopMoving}>
+      Z+
+   </button>
+   <!-- Y+ Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("y", 1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("y", 1)}
+      on:touchend={stopMoving}>
+      Y+
+   </button>
+   <!-- X+ Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("x", 1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("x", 1)}
+      on:touchend={stopMoving}>
+      X+
+   </button>
+   <!-- Z- Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("z", -1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("z", -1)}
+      on:touchend={stopMoving}>
+      Z-
+   </button>
+   <!-- Y- Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("y", -1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("y", -1)}
+      on:touchend={stopMoving}>
+      Y-
+   </button>
+   <!-- X- Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("x", -1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("x", -1)}
+      on:touchend={stopMoving}>
+      X-
+   </button>
+   
+   <div class="grid grid-cols-3 gap-3 bg-indigo-600 bg-opacity-20 rounded">
+   <!-- Rz+ Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("c", 1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("c", 1)}
+      on:touchend={stopMoving}>
+      Rz+
+   </button>
+   <!-- Ry+ Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("b", 1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("b", 1)}
+      on:touchend={stopMoving}>
+      Ry+
+   </button>
+   <!-- Rx+ Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("a", 1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("a", 1)}
+      on:touchend={stopMoving}>
+      Rx+
+   </button>
+   <!-- Rz- Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("c", -1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("c", -1)}
+      on:touchend={stopMoving}>
+      Rz-
+   </button>
+   <!-- Ry- Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("b", -1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("b", -1)}
+      on:touchend={stopMoving}>
+      Ry-
+   </button>
+   <!-- Rx- Button -->
+   <button
+      class="p-4 bg-orange-500 text-white rounded justify-center text-sm hover:bg-orange-600"
+      on:mousedown={() => startMoving("a", -1)}
+      on:mouseup={stopMoving}
+      on:mouseleave={stopMoving}
+      on:touchstart={() => startMoving("a", -1)}
+      on:touchend={stopMoving}>
+      Rx-
+   </button>
+   </div>

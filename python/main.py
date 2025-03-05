@@ -92,8 +92,6 @@ def	reader():
 				# 			await lara.reset_collision()
 				# 			unblock_collided_counter = 0
 
-		time.sleep(0.001)
-
 @asynccontextmanager
 async def lifespan(app:	FastAPI):
 	global serial_handler, udp_server, reader_thread, stop_event, lara, ip
@@ -527,10 +525,7 @@ async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 50.
 		
 		# First stage: Move down continuously until near target pressure
 		print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
-		lara.robot.turn_on_jog(
-			jog_velocity=[0, 0, -1, 0, 0, 0],  # Downward movement
-			jog_type='Cartesian'
-		)
+		lara.start_moving(0, 0, -1, 0, 0, 0)
 		
 		# Continue moving until within range of target pressure
 		for i in range(1000):
@@ -552,18 +547,18 @@ async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 50.
 					break
 					
 			# Continue jogging down
-			lara.robot.jog(set_jogging_external_flag = 1)
+			lara.start_moving(0, 0, -1, 0, 0, 0)
 			await asyncio.sleep(0.01)
 			
 			# Safety timeout
 			if i == 999:
-				lara.robot.turn_off_jog()
+				lara.stopMoving()
 				emit_error(1, error)
 				threshold = threshold_default
 				return {"error": "Could not reach target pressure within movement limit"}
 		
 		# Turn off jog before considering next steps
-		lara.robot.turn_off_jog()
+		lara.stopMoving()
 		
 		# Only do fine adjustment if pressure is above threshold (3000)
 		if pressure >= 3000:
@@ -581,7 +576,7 @@ async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 50.
 		print(f"Error in moveUntilPressure: {error}")
 		threshold = threshold_default
 	finally:
-		lara.robot.turn_off_jog()
+		lara.stopMoving()
 		if error:
 			emit_error(1, error)
 			return {"error": error}
@@ -608,25 +603,17 @@ async def fine_adjust_pressure(pressure: float = 1000.0, wiggle_room: float = 50
 				if current_force < pressure - wiggle_room:
 					# Too little pressure, move down
 					print("Pressure too low - moving down")
-					lara.robot.turn_on_jog(
-						jog_velocity=[0, 0, -0.2, 0, 0, 0],  # Slow downward
-						jog_type='Cartesian'
-					)
-					lara.robot.jog(set_jogging_external_flag = 1)
+					lara.start_moving(0, 0, -0.2, 0, 0, 0)
 					stable_count = 0
 				elif current_force > pressure + wiggle_room:
 					# Too much pressure, move up
 					print("Pressure too high - moving up")
-					lara.robot.turn_on_jog(
-						jog_velocity=[0, 0, 0.2, 0, 0, 0],  # Slow upward
-						jog_type='Cartesian'
-					)
-					lara.robot.jog(set_jogging_external_flag = 1)
+					lara.start_moving(0, 0, 0.2, 0, 0, 0)
 					stable_count = 0
 				else:
 					# Within threshold, increase stable count
 					print(f"Within threshold, stable count: {stable_count}/{required_stable_readings}")
-					lara.robot.turn_off_jog()
+					lara.stopMoving()
 					stable_count += 1
 					if stable_count >= required_stable_readings:
 						print("Pressure stabilized within threshold")
@@ -640,7 +627,7 @@ async def fine_adjust_pressure(pressure: float = 1000.0, wiggle_room: float = 50
 		error = str(e)
 		print(f"Error during pressure adjustment: {error}")
 	finally:
-		lara.robot.turn_off_jog()
+		lara.stopMoving()
 		if error:
 			return {"error": error}
 		return {"success": f"Force stabilized at {current_force} (target: {pressure}±{wiggle_room})"}

@@ -207,6 +207,9 @@ async def setOffset():
 		await asyncio.sleep(0.5)
 		if counter > 10:
 			return {"error": "No data received from the camera"}
+
+
+
 @app.post("/AlingMove")
 async def AlingMove():
 	global lara, current_data
@@ -214,53 +217,8 @@ async def AlingMove():
 	flag_buffered_movement = False
 	current_translation_speed = 4
 	await lara.set_translation_speed_mms(current_translation_speed)
-	import socketio
-	sio = socketio.AsyncClient(logger=False, engineio_logger=False)
-	await sio.connect('http://192.168.2.13:8081')
-	async def heart_beat(*args, **kwargs):
-		await sio.emit('heartbeat_response', True)
-		print("Heartbeat response")
-	sio.on('heartbeat_check', heart_beat)
-	async def start_movement_slider(q0, q1, q2, q3, q4, q5):
-		data = {
-			'q0': q0,
-			'q1': q1,
-			'q2': q2,
-			'q3': q3,
-			'q4': q4,
-			'q5': q5,
-			'status': True,
-			'joint': False,
-			'cartesian': True,
-			'freedrive': False,
-			'button': False,
-			'slider': True,
-			'goto': False,
-			'threeD': False,
-			'reference': "Base",
-			'absrel': "Absolute",
-		}
-		await sio.emit('CartesianSlider', data)
-	async def stop_movement_slider(q0, q1, q2, q3, q4, q5):
-		data = {
-			'q0': q0,
-			'q1': q1,
-			'q2': q2,
-			'q3': q3,
-			'q4': q4,
-			'q5': q5,
-			'status': False,
-			'joint': False,
-			'cartesian': True,
-			'freedrive': False,
-			'button': False,
-			'slider': True,
-			'goto': False,
-			'threeD': False,
-			'reference': "Base"
-		}
-		await sio.emit('CartesianSlider', data)
-
+	
+	
 	#rough alligment phase
 	detection_timeout = 0.25 # 250ms
 	last_detection_time = time.time()
@@ -308,7 +266,7 @@ async def AlingMove():
 				rotation_tolerance = deg2rad(0.2)
 			if success:
 				flag_buffered_movement = True
-				await stop_movement_slider(0, 0, 0, 0, 0, 0)
+				lara.stopMoving()
 				#add to the final tcp pose the z angle of the tag
 				final_z_angle = tcp_pose[5] - angle_tag_z
 				#normalize the angle between -pi and pi
@@ -322,7 +280,8 @@ async def AlingMove():
 					lara.robot.unpause()
 					flag_buffered_movement = False
 					await asyncio.sleep(0.3)
-				await start_movement_slider(0, 0, -1, 0, 0, 0)
+				# start_movement_slider(0, 0, -1, 0, 0, 0)
+				lara.start_moving(0, 0, -1, 0, 0, 0)
 				await asyncio.sleep(0.05)
 				if not (abs(V2.x) < tolerance and abs(V2.y) < tolerance and abs(angle_tag_z) < rotation_tolerance):
 					print("Movement needed")
@@ -330,7 +289,8 @@ async def AlingMove():
 				
 		else:
 			if time.time() - last_detection_time > detection_timeout:
-				await start_movement_slider(0, 0, 0, 0, 0, 0)
+				# await start_movement_slider(0, 0, 0, 0, 0, 0)
+				lara.stopMoving()
 				await asyncio.sleep(0.5)
 				lara.robot.stop()
 				lara.robot.set_mode("Teach")
@@ -375,7 +335,6 @@ async def AlingMove():
 	lara.robot.turn_off_jog()
 	lara.robot.stop()
 	await asyncio.sleep(0.5)
-	await sio.disconnect()
 	return {"status": "ok"}
 
 @app.post("/Retract")
