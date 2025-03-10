@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { temperature } from "$lib/coordinate";
+  import { temperature } from "$lib/robotics/coordinate";
   import ChartWorker from './ChartWorker.ts?worker'; // or wherever your worker is
     import TorqueChart from "./TorqueChart.svelte";
 

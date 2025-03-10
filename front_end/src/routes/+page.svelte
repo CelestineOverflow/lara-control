@@ -19,7 +19,7 @@
   import Tray from "$lib/Tray.svelte";
   import Accordion from "$lib/Accordion.svelte";
   import { Pane, Splitpanes } from "svelte-splitpanes";
-    import { autonomous_control } from "$lib/coordinate";
+    import { autonomous_control } from "$lib/robotics/coordinate";
   let hue: number = 0;
   let sat: number = 100;
   let light: number = 50;

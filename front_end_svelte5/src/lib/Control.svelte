@@ -1,10 +1,30 @@
 <script lang="ts">
+	import CartesianPad from "$lib/CartesianPad.svelte";
+	import Tray from "./Tray.svelte";
+
 	// State variables
 	let hue: number = 0;
 	let sat: number = 100;
 	let light: number = 50;
 	let force: number = 1000;
 	let on_off: boolean = false;
+	
+	// Track open/closed state for each accordion section
+	let openSections = {
+		waypoint: false,
+		setWaypoints: false,
+		pressure: false,
+		temperature: false,
+		lightControl: false,
+		armControl: false,
+		cameraControl: false
+	};
+	
+	// Toggle function for accordion sections
+	const toggleSection = (section: string) => {
+		openSections[section] = !openSections[section];
+	};
+	
 	// Mock API functions
 	const tare = () => console.log('Tare force probe');
 	const press = (f: number) => console.log(`Pressing with force: ${f}g`);
@@ -24,67 +44,52 @@
 	// Mock autonomous control
 	const autonomous_control = { subscribe: () => ({ unsubscribe: () => {} }) };
 </script>
-
-<div class="p-4">
-  <div class="join join-vertical bg-base-100">
-    <!-- Pressure Section -->
+<div class="w-full h-full">
+  <div class="join join-vertical bg-base-100 w-full">
+    <!-- Go to Waypoint Section -->
     <div class="collapse collapse-arrow join-item border-base-300 border">
-      <input type="radio" name="controls-accordion" checked="checked" />
-      <div class="collapse-title font-semibold">Pressure 🧊</div>
+      <input type="checkbox" checked={openSections.waypoint} on:change={() => toggleSection('waypoint')} />
+      <div class="collapse-title font-semibold">Go to Waypoints</div>
       <div class="collapse-content">
-        <div class="mb-4">
-          <button
-            on:click={() => tare()}
-            class="btn rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
-          >
-            Tare force probe
-          </button>
-          <p class="mb-2 text-sm font-bold text-gray-700">Current Force Target: {force} g</p>
-          <label for="force" class="mb-2 block text-sm font-bold text-gray-700">Force (g)</label>
-          <input
-            type="number"
-            value={force}
-            on:input={(e) => (force = parseInt(e.target.value))}
-            class="input w-full rounded border px-3 py-2 text-gray-700"
-          />
-          <button
-            on:click={() => press(force)}
-            class="btn mt-2 rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
-          >
-            Press
-          </button>
-        </div>
+        <Tray />
+        <button
+          on:click={() => goToSocket()}
+          class="btn rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
+        >
+          Go to Socket
+        </button>
+        <button
+          on:click={() => togglePump(on_off).then(() => (on_off = !on_off))}
+          class="btn mt-2 rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
+        >
+          {on_off ? 'Turn Off Pump' : 'Turn On Pump'}
+        </button>
       </div>
     </div>
-
-    <!-- Temperature Section -->
+    <!-- Set Waypoints Section -->
     <div class="collapse collapse-arrow join-item border-base-300 border">
-      <input type="radio" name="controls-accordion" />
-      <div class="collapse-title font-semibold">Temperature 🌡️</div>
+      <input type="checkbox" checked={openSections.setWaypoints} on:change={() => toggleSection('setWaypoints')} />
+      <div class="collapse-title font-semibold">Set Waypoints</div>
       <div class="collapse-content">
-        <div class="mb-4">
-          <input
-            type="text"
-            value={heater}
-            on:input={(e) => setHeater(parseInt(e.target.value))}
-            on:keypress={(e) => {
-              if (e.key === 'Enter') setHeater(parseInt(e.target.value));
-            }}
-            class="input w-full rounded border px-3 py-2 text-gray-700"
-          />
-          <button
-            on:click={() => setHeater(heater)}
-            class="btn mt-2 rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
-          >
-            Set
-          </button>
-        </div>
+        <button
+          class="btn rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
+          on:click={setTray}
+        >
+          Generate Tray
+        </button>
+        <button
+          on:click={() => setSocket()}
+          class="btn ml-2 rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
+        >
+          Set Socket
+        </button>
       </div>
     </div>
-
+ 
+    
     <!-- Light Control Section -->
     <div class="collapse collapse-arrow join-item border-base-300 border">
-      <input type="radio" name="controls-accordion" />
+      <input type="checkbox" checked={openSections.lightControl} on:change={() => toggleSection('lightControl')} />
       <div class="collapse-title font-semibold">Light Control 🚦</div>
       <div class="collapse-content">
         <div class="mb-4">
@@ -153,70 +158,15 @@
         </div>
       </div>
     </div>
-
     <!-- Arm Control Section -->
     <div class="collapse collapse-arrow join-item border-base-300 border">
-      <input type="radio" name="controls-accordion" />
+      <input type="checkbox" checked={openSections.armControl} on:change={() => toggleSection('armControl')} />
       <div class="collapse-title font-semibold">Arm Control 🦾</div>
       <div class="collapse-content">
-        <div class="mb-2 flex h-20 items-center justify-center bg-gray-200">
-          <p class="text-gray-500">Cartesian Pad</p>
-        </div>
+        <CartesianPad />
       </div>
     </div>
-
-    <!-- Camera Control Section -->
-    <div class="collapse collapse-arrow join-item border-base-300 border">
-      <input type="radio" name="controls-accordion" />
-      <div class="collapse-title font-semibold">Camera Control 📷</div>
-      <div class="collapse-content">
-        <div class="mb-2 flex h-20 items-center justify-center bg-gray-200">
-          <p class="text-gray-500">Camera Control</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Go to Waypoint Section -->
-    <div class="collapse collapse-arrow join-item border-base-300 border">
-      <input type="radio" name="controls-accordion" />
-      <div class="collapse-title font-semibold">Go to Waypoint</div>
-      <div class="collapse-content">
-        <div class="mb-2 flex h-20 items-center justify-center bg-gray-200">
-          <p class="text-gray-500">Tray</p>
-        </div>
-        <button
-          on:click={() => goToSocket()}
-          class="btn rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
-        >
-          Go to Socket
-        </button>
-        <button
-          on:click={() => togglePump(on_off).then(() => (on_off = !on_off))}
-          class="btn mt-2 rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
-        >
-          {on_off ? 'Turn Off Pump' : 'Turn On Pump'}
-        </button>
-      </div>
-    </div>
-
-    <!-- Set Waypoints Section -->
-    <div class="collapse collapse-arrow join-item border-base-300 border">
-      <input type="radio" name="controls-accordion" />
-      <div class="collapse-title font-semibold">Set Waypoints</div>
-      <div class="collapse-content">
-        <button
-          class="btn rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
-          on:click={setTray}
-        >
-          Generate Tray
-        </button>
-        <button
-          on:click={() => setSocket()}
-          class="btn ml-2 rounded bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-700"
-        >
-          Set Socket
-        </button>
-      </div>
-    </div>
+    
   </div>
 </div>
+

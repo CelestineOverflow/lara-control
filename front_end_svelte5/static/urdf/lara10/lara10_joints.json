@@ -1,0 +1,47 @@
+{
+    "lara10_root_joint": {
+        "type": "fixed"
+    },
+    "lara10_joint1": {
+        "type": "revolute",
+        "lower": -3.1415926,
+        "upper": 3.1415926,
+        "value": 0
+    },
+    "lara10_joint2": {
+        "type": "revolute",
+        "lower": -3.1415926,
+        "upper": 3.1415926,
+        "value": 0
+    },
+    "lara10_joint3": {
+        "type": "revolute",
+        "lower": -2.6179938,
+        "upper": 2.6179938,
+        "value": 0
+    },
+    "lara10_joint4": {
+        "type": "revolute",
+        "lower": -3.1415926,
+        "upper": 3.1415926,
+        "value": 0
+    },
+    "lara10_joint5": {
+        "type": "revolute",
+        "lower": -3.1415926,
+        "upper": 3.1415926,
+        "value": 0
+    },
+    "lara10_joint6": {
+        "type": "revolute",
+        "lower": -6.283185307,
+        "upper": 6.283185307,
+        "value": 0
+    },
+    "lara10_link6_to_flange": {
+        "type": "fixed"
+    },
+    "world_joint": {
+        "type": "fixed"
+    }
+}
