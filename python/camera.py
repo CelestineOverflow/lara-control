@@ -220,7 +220,7 @@ async def AlingMove():
 	
 	
 	#rough alligment phase
-	detection_timeout = 0.25 # 250ms
+	detection_timeout = 0.5 # 250ms
 	last_detection_time = time.time()
 	success = True
 	while True:
@@ -302,7 +302,7 @@ async def AlingMove():
 	lara.robot.stop()
 	#fine alligment phase
 	await lara.set_translation_speed_mms(1)#
-	detection_timeout = 0.2 # 200ms
+	detection_timeout = 0.5 # 200ms
 	last_detection_time = time.time()
 	while True:
 		if current_data:
@@ -651,11 +651,11 @@ def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
 		detectionsVectors[d.tag_id] = Pose(_tag_position,  Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3]))
 		#check if tag 0 is closer than 10mm
 		if d.tag_id == 0:
-			if raw_z < 0.03 and current_setting_resolution != close_up_resolution:
+			if _tag_position.z < 0.07 and current_setting_resolution != close_up_resolution:
 				print("Changing camera resolution to close up")
 				current_setting_resolution = close_up_resolution
 				change_camera_flag = True
-			elif raw_z >= 0.04 and current_setting_resolution != far_resolution: # histeresis
+			elif _tag_position.z >= 0.09 and current_setting_resolution != far_resolution: # histeresis
 				print("Changing camera resolution to far")
 				current_setting_resolution = far_resolution
 				change_camera_flag = True

@@ -269,6 +269,8 @@ class Lara:
 		#move
 		self.__move_to_steps(steps)
 	
+
+	
 	def __move_to_steps(self, steps):
 		if not steps:
 			raise ValueError("No steps provided")
@@ -309,6 +311,7 @@ class Lara:
 				raise ValueError("Error occurred during movement")
 			else:
 				print("Movement completed successfully")
+
 
 	def move_to_pose(self, pose: Pose):
 		'''

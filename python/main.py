@@ -7,7 +7,7 @@ from fastapi.middleware.cors import	CORSMiddleware
 import asyncio
 from typing	import List
 from tray import Tray
-from space import Euler, Vector3, Quaternion, Matrix4, Pose
+from space import Euler, Vector3, Quaternion, Matrix4, Pose, PoseCartesian
 import numpy as np
 from lara import Lara
 import os
@@ -510,6 +510,105 @@ async def move_to_socket():
 	except Exception as e:
 		emit_error(1, f"Error during first-time socket move: {str(e)}")
 		return {"error": f"Error during first-time socket move: {str(e)}"}
+
+@app.post("/to_tray")
+async def to_tray():
+	global lara
+	tcp_pose = lara.current_pose()
+	a0_cell = tray.get_cell_robot_orientation(0, 0)
+	current_joint_angles = lara.robot.get_current_joint_angles()
+	a0_cartesian = PoseCartesian(position=a0_cell.position, orientation=a0_cell.orientation.to_euler(order="xyz"))
+	lara.robot.set_mode("Automatic")
+	try:
+		joint_property = {
+			"speed": 50.0,
+			"acceleration": 50.0,
+			"safety_toggle": True,
+			"target_joint": [
+				[
+					current_joint_angles[0],
+					current_joint_angles[1],
+					current_joint_angles[2],
+					current_joint_angles[3],
+					current_joint_angles[4],
+					current_joint_angles[5]
+				],
+				[
+					-0.5235,
+					-0.056414989727909474,
+					1.5068518732631686,
+					0.0006344149059273136,
+					1.6912666241349086,
+					2.322130079912925
+				],
+				[
+					1.5707873386262174,
+					-0.056414989727909474,
+					1.5068518732631686,
+					0.0006344149059273136,
+					1.6912666241349086,
+					2.322130079912925
+				]
+				
+			],
+			"current_joint_angles":  lara.robot.get_current_joint_angles()
+		}
+		lara.robot.move_joint(**joint_property)
+		lara.robot.stop() # if there are multiple motions than,this needs to be called only once at the end of the script
+		lara.robot.set_mode("Teach")
+		return {"success": "ok"}
+	except Exception as e:
+		error = str(e)
+		emit_error(1, error)
+		return {"error": "IK Failure"}
+@app.post("/to_socket")
+async def to_socket():
+	global lara
+	current_joint_angles = lara.robot.get_current_joint_angles()
+	lara.robot.set_mode("Automatic")
+	try: 
+		joint_property = {
+				"speed": 50.0,
+				"acceleration": 50.0,
+				"safety_toggle": True,
+				"target_joint": [
+					[
+						current_joint_angles[0],
+						current_joint_angles[1],
+						current_joint_angles[2],
+						current_joint_angles[3],
+						current_joint_angles[4],
+						current_joint_angles[5]
+					],
+					[
+						1.5707873386262174,
+						-0.056414989727909474,
+						1.5068518732631686,
+						0.0006344149059273136,
+						1.6912666241349086,
+						2.322130079912925
+					],
+					[
+						-0.5235,
+						-0.056414989727909474,
+						1.5068518732631686,
+						0.0006344149059273136,
+						1.6912666241349086,
+						2.322130079912925
+					]
+					
+				],
+				"current_joint_angles":  lara.robot.get_current_joint_angles()
+			}
+		lara.robot.move_joint(**joint_property)
+		lara.robot.stop()
+		lara.robot.set_mode("Teach")
+		return {"success": "ok"}
+	except Exception as e:
+		error = str(e)
+		emit_error(1, error)
+		return {"error": "IK Failure"}
+
 
 @app.post("/moveUntilPressure")
 async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 50.0):
