@@ -17,7 +17,16 @@ from websockets.sync.client import connect
 import json		
 link = "ws://192.168.2.209:8082"
 		
-
+class AsyncWrapper:
+	def __init__(self, robot):
+		self._robot = robot
+	def __getattr__(self, name):
+		attr = getattr(self._robot, name)
+		if callable(attr):
+			async def wrapper(*args, **kwargs):
+				return await asyncio.to_thread(attr, *args, **kwargs)
+			return wrapper
+		return attr
 
 
 
@@ -52,6 +61,7 @@ class Lara:
 		self.started_movement_slider = False
 		self.current_linear_speed = None # Meters
 		self.current_rotation_speed = None # Rads
+		self.async_robot = AsyncWrapper(self.robot)
 
 
 	async def report_error(self, data):
@@ -573,7 +583,7 @@ class Lara:
 			reply = websocket.recv()
 			print(f"Start moving reply: {reply}")
 
-
+	
 if __name__	== "__main__":
 	import asyncio
 	async def main():

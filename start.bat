@@ -2,6 +2,5 @@
 cd python
 start "api" cmd /k "python daemon_process.py"
 cd ..
-start "web app" cmd /k "npm run dev -- --host"
-
-start "test_control" cmd.exe /K "cd /D C:\Users\nxp84358\Documents\GitHub\test_control && npm start"
+start "front_end" cmd /k "cd front_end && npm run dev -- --host"
+start "jog_control" cmd.exe /K "cd /DC:\Users\nxp84358\Documents\GitHub\lara-control\jog_control && npm start"
