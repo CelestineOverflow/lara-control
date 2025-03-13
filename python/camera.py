@@ -221,7 +221,6 @@ async def AlingMove():
 	detection_timeout = 0.5 # 250ms
 	last_detection_time = time.time()
 	#rough alligment phase
-	
 	success = True
 	while True:
 		if current_data:
@@ -234,11 +233,9 @@ async def AlingMove():
 			current_arm_pose = lara.current_pose_raw()
 			current_arm_orientation = current_arm_pose.orientation
 			current_arm_orientation_euler = current_arm_orientation.to_euler()
-
 			current_tag_orientation = quaternion.to_euler()
 			angle_tag_z = current_tag_orientation.z
 			angle_arm_z = current_arm_orientation_euler.z
-			# print(f"Tag angle: {angle_tag_z * 180 / math.pi:.2f} Arm angle: {angle_arm_z * 180 / math.pi:.2f}")
 			V2 = Vector2(position.x, position.y)
 			V2 = V2.rotate(angle_arm_z)
 			tcp_pose = lara.robot.get_tcp_pose()
@@ -246,35 +243,18 @@ async def AlingMove():
 			final_z_angle = tcp_pose[5] - angle_tag_z
 			#normalize the angle between -pi and pi
 			final_z_angle = (final_z_angle + math.pi) % (2 * math.pi) - math.pi
-			
-			# print(f"Original x: {position.x * 1000:.2f} mm Original y: {position.y * 1000:.2f}")
-			# print(f"Test x: {V2.x * 1000:.2f} mm Test y: {V2.y * 1000:.2f} mm, rotation: {angle_arm_z }")
-			
-			# print(f"Tag angle: {angle_tag_z * 180 / math.pi:.2f}")
-			# print(f"Arm angle: {tcp_pose[3] * 180 / math.pi:.2f}")
-			# print(f"Arm angle 3 : {tcp_pose[3] * 180 / math.pi:.2f}")
-			# print(f"Arm angle 4 : {tcp_pose[4] * 180 / math.pi:.2f}")
-			# print(f"Arm angle 5 : {tcp_pose[5] * 180 / math.pi:.2f}")
 			if position.z < 0.01:
 				break
-			#starting tolerances
-			tolerance = 0.01 # 10mm
-			rotation_tolerance = deg2rad(1) # 2 degrees
-			if position.z < 0.1: # less than 100mm
-				tolerance = 0.05 # 10mm
-				rotation_tolerance = deg2rad(0.75)
-			if position.z < 0.05: # less than 50mm
-				tolerance = 0.003 # 5mm
-				rotation_tolerance = deg2rad(0.5)
-			if position.z < 0.03: # less than 30mm
-				tolerance = 0.002 # 2mm
-				rotation_tolerance = deg2rad(0.2)
+			tolerance_full_movement = 0.005 # 5mm
+			tolerance = 0.001 # 10mm
+			rotation_tolerance = deg2rad(1)
+			if not(abs(V2.x) < tolerance_full_movement and abs(V2.y) < tolerance_full_movement and abs(angle_tag_z) < rotation_tolerance):
+				success = True
+			
 			if success:
 				flag_buffered_movement = True
 				lara.stopMoving()
-				# success = move_relative(-V2.x, -V2.y, 0, 0, 0, final_z_angle)
 				success = await asyncio.to_thread(move_relative, -V2.x, -V2.y, 0, 0, 0, final_z_angle)
-				await asyncio.sleep(0.05)
 			else:
 				if flag_buffered_movement:
 					lara.robot.stop()
@@ -282,13 +262,12 @@ async def AlingMove():
 					lara.robot.unpause()
 					flag_buffered_movement = False
 					await asyncio.sleep(0.3)
-				# start_movement_slider(0, 0, -1, 0, 0, 0)
-
-				lara.start_moving(0, 0, -1, 0, 0, 0)
-				await asyncio.sleep(0.05)
-				if not (abs(V2.x) < tolerance and abs(V2.y) < tolerance and abs(angle_tag_z) < rotation_tolerance):
-					print("Movement needed")
-					success = True
+				if not(abs(angle_tag_z) < rotation_tolerance):
+					lara.start_moving(0, 0, 0, 0, 0, final_z_angle)
+				if not (abs(V2.x) < tolerance and abs(V2.y) < tolerance):
+					lara.start_moving(-V2.x, -V2.y, 0, 0, 0, 0)
+				else:
+					lara.start_moving(0, 0, -1, 0, 0, 0)
 		else:
 			if time.time() - last_detection_time > detection_timeout_break:
 				lara.stopMoving()
@@ -298,7 +277,7 @@ async def AlingMove():
 				return {"error": "No data received from the camera"}
 			elif time.time() - last_detection_time > detection_timeout:
 				lara.stopMoving()
-			await asyncio.sleep(0.05)
+		await asyncio.sleep(0.01)
 	lara.robot.stop()
 	lara.robot.set_mode("Teach")
 	lara.robot.unpause()

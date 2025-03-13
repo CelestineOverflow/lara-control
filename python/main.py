@@ -470,16 +470,22 @@ async def move_to_socket():
 	except Exception as e:
 		emit_error(1, f"Error during first-time socket move: {str(e)}")
 		return {"error": f"Error during first-time socket move: {str(e)}"}
+	
+
 
 @app.post("/to_tray")
 async def to_tray():
-	global lara
+	global lara, tray
+	cell_a0 = tray.get_cell_robot_orientation(0, 0)
+	cell_a0_position = cell_a0.position
+	#compute headint using x and y
+	heading_tray = np.arctan2(cell_a0_position.y, cell_a0_position.x)
 	current_joint_angles = await lara.async_robot.get_current_joint_angles()
 	lara.robot.set_mode("Automatic")
 	try:
 		joint_property = {
 			"speed": 50.0,
-			"acceleration": 50.0,
+			"acceleration": 3.0,
 			"safety_toggle": True,
 			"target_joint": [
 				[
@@ -491,7 +497,7 @@ async def to_tray():
 					current_joint_angles[5]
 				],
 				[
-					-0.5235,
+					current_joint_angles[0],
 					-0.056414989727909474,
 					1.5068518732631686,
 					0.0006344149059273136,
@@ -499,7 +505,7 @@ async def to_tray():
 					2.322130079912925
 				],
 				[
-					1.5707873386262174,
+					heading_tray,
 					-0.056414989727909474,
 					1.5068518732631686,
 					0.0006344149059273136,
@@ -521,13 +527,15 @@ async def to_tray():
 	
 @app.post("/to_socket")
 async def to_socket():
-	global lara
+	global lara, socket_pose
+	socket_position = socket_pose.position
+	heading_socket = np.arctan2(socket_position.y, socket_position.x)
 	current_joint_angles = await asyncio.to_thread(lara.robot.get_current_joint_angles)
 	await asyncio.to_thread(lara.robot.set_mode, "Automatic")
 	try: 
 		joint_property = {
 				"speed": 50.0,
-				"acceleration": 50.0,
+				"acceleration": 3.0,
 				"safety_toggle": True,
 				"target_joint": [
 					[
@@ -539,7 +547,7 @@ async def to_socket():
 						current_joint_angles[5]
 					],
 					[
-						1.5707873386262174,
+						current_joint_angles[0],
 						-0.056414989727909474,
 						1.5068518732631686,
 						0.0006344149059273136,
@@ -547,7 +555,7 @@ async def to_socket():
 						2.322130079912925
 					],
 					[
-						-0.5235,
+						heading_socket,
 						-0.056414989727909474,
 						1.5068518732631686,
 						0.0006344149059273136,
@@ -659,7 +667,7 @@ async def fine_adjust_pressure(pressure: float = 1000.0, wiggle_room: float = 50
 						print("Pressure stabilized within threshold")
 						break
 				await asyncio.sleep(0.02)
-			if i == 199:
+			if i == 1000:
 				error = "Failed to stabilize pressure within maximum iterations"
 	except Exception as e:
 		error = str(e)
