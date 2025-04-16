@@ -1,68 +1,73 @@
 <script lang="ts">
 	import LaraState from '$lib/LaraState.svelte';
-	import { connectApi } from '$lib/robotics/coordinate';
+	import { connect2Demon, connectApi } from '$lib/robotics/coordinate.svelte';
 	import { setupSocket } from '$lib/robotics/laraapi';
-	import { error, warning } from '$lib/robotics/coordinate';
+	import { error, warning } from '$lib/robotics/coordinate.svelte';
 	import '../app.css';
 	let { children } = $props();
 	import { onMount } from 'svelte';
-	import Notification from '$lib/Notification.svelte';
+	import System from '$lib/System.svelte';
+	// import Notification from '$lib/Notification.svelte';
 
 	onMount(async () => {
 		await setupSocket();
 		connectApi();
+		connect2Demon();
 	});
 
-	// let notification_type = 'success';
-	let notification_type = $state("success");
-	// let notification_message = 'test';
-	let notification_message = $state("test");
-	// let show_notification = false;
-	let show_notification = $state(false);
+	// let notification_type = $state("success");
+	// let notification_message = $state("test");
+	// let show_notification = $state(false);
 
-	$effect(() => {
-		if ($error) {
-			notification_type = 'error';
-			notification_message = "wsws";
-			show_notification = true;
-		}
-		if ($warning) {
-			notification_type = 'warning';
-			notification_message = "wsws";
-			show_notification = true;
-		}
-	});
-	
-
+	// function showNotification(type: string, message: string) {
+	// 	notification_type = type;
+	// 	notification_message = message;
+	// 	show_notification = true;
+	// 	setTimeout(() => {
+	// 		show_notification = false;
+	// 		notification_message = "";
+	// 	}, 1000);
+	// }
 </script>
 
-<!-- <Notification bind:type={notification_type} bind:content={notification_message} bind:show={show_notification} /> -->
-
-
-<div class="navbar bg-base-100 shadow-sm">
-	<div class="flex-none">
-	  <!-- svelte-ignore a11y_consider_explicit_label -->
-	  <button class="btn btn-square btn-ghost">
-		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block h-5 w-5 stroke-current"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path> </svg>
-	  </button>
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_missing_attribute -->
+<div class="navbar bg-base text-primary-content">
+	
+	<div class="navbar-start">
+		<a href="/" class="btn btn-ghost text-xl">LabHandler</a>
 	</div>
-	<div class="flex-1">
-	  <!-- svelte-ignore a11y_missing_attribute -->
-	  <a class="btn btn-ghost text-xl">LabHandler</a>
-	</div>
-	<div class="">
+	<div class="navbar-center">
+		<System />
 		<LaraState />
 	</div>
-	<div class="flex-none">
-	  <!-- svelte-ignore a11y_consider_explicit_label -->
-	  <button class="btn btn-square btn-ghost">
-		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block h-5 w-5 stroke-current"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"></path> </svg>
-	  </button>
+	<div class="navbar-end">
+		<div class="dropdown dropdown-end">
+			<div tabindex="0" role="button" class="btn btn-ghost btn-circle">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-5 w-5"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M4 6h16M4 12h16M4 18h7"
+					/>
+				</svg>
+			</div>
+			<ul
+				tabindex="0"
+				class="menu menu-md dropdown-content bg-base-100 rounded-box z-1 mt-3 w-100 p-2 shadow-lg"
+			>
+				<li><a href="/">Dashboard</a></li>
+				<li><a href="/docs">Docs</a></li>
+			</ul>
+		</div>
+		
 	</div>
-  </div>
+</div>
 {@render children()}
-
-
-
-
-

@@ -5,7 +5,7 @@
 		stopMovementSlider,
 		setRotationalSpeed
 	} from '$lib/robotics/laraapi';
-	import { robotJoints } from '$lib/robotics/coordinate';
+	import { robotJoints } from '$lib/robotics/coordinate.svelte';
 	import { radToDeg } from 'three/src/math/MathUtils.js';
 	import { onMount, onDestroy } from 'svelte';
 	import * as THREE from 'three';
@@ -18,9 +18,6 @@
 	 * but for a z move the full local transformation is applied.
 	 */
 	function move(axis: 'x' | 'y' | 'z' | 'a' | 'b' | 'c', direction: 1 | -1) {
-		console.log('move along normal', moveAlongNormal);
-		console.log('axis', axis);
-		console.log('direction', direction);
 		let movementVector = [0, 0, 0]; // [dx, dy, dz]
 		let newA = 0,
 			newB = 0,

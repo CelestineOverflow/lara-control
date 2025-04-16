@@ -10,7 +10,7 @@
 #define pump_pwm     9
 #define fan_pwm      5
 #define heater_pwm   12
-#define SK6812_PIN   18
+#define SK6812_PIN   7
 
 // Temperature boundaries
 #define MIN_TEMP     -60.0
@@ -130,27 +130,8 @@ void controlTemperature(float currentTemp) {
   if (output > 100) output = 100;
 
   heater_percentage = (int)output;
-  analogWrite(heater_pwm, map(heater_percentage, 0, 100, 0, 255));
+  analogWrite(heater_pwm, map(heater_percentage, 0, 100, 0, 200));
 }
-
-// void checkThermalRunaway() {
-//   float currentDelta = fabs(setTemperature - lastTemp);
-//   if (currentDelta <= STABLE_THRESHOLD) {
-//     lastRunawayCheckTime  = millis();
-//     lastRunawayCheckDelta = currentDelta;
-//     return;
-//   }
-
-//   unsigned long now = millis();
-//   if (now - lastRunawayCheckTime >= THERMAL_RUNAWAY_CHECK_INTERVAL) {
-//     float improvement = lastRunawayCheckDelta - currentDelta;
-//     if (heater_percentage > 0 && improvement < DELTA_IMPROVEMENT_THRESHOLD) {
-//       errorCode = ERR_THERMAL_RUNAWAY;
-//     }
-//     lastRunawayCheckTime  = now;
-//     lastRunawayCheckDelta = currentDelta;
-//   }
-// }
 
 void reportError(int code) {
   if (code == ERR_THERMAL_RUNAWAY) {
@@ -175,8 +156,6 @@ void clearError() {
 }
 
 void serial_connected_sequence() {
-  // tare();
-  // turn on pump, fan
   pump_percentage = 100;
   fan_percentage  = 100;
   analogWrite(pump_pwm, map(pump_percentage, 0, 100, 0, 255));
@@ -338,12 +317,6 @@ void processCommand() {
     int val = constrain(doc["pump"].as<int>(), 0, 100);
     pump_percentage = val;
     analogWrite(pump_pwm, map(val, 0, 100, 0, 255));
-  }
-
-  if (!doc["heater"].isNull()) {
-    int val = constrain(doc["heater"].as<int>(), 0, 100);
-    heater_percentage = val;
-    analogWrite(heater_pwm, map(val, 0, 100, 0, 255));
   }
 
   if (!doc["fan"].isNull()) {

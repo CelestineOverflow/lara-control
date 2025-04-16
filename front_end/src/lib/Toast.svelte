@@ -1,20 +1,24 @@
 <script lang="ts">
-    export let show: boolean;
     let dialog: HTMLDialogElement;
-    $: if (dialog && show) dialog.show();
+    let { show, content } = $props();
+
+    $effect(() => {
+        if (dialog && !show) dialog.close();
+    });
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 <dialog
     bind:this={dialog}
-    on:close={() => (show = false)}
-    on:click|self={() => dialog.close()}
+    onclose={() => (show = false)}
+    onclick={() => dialog.close()}
     class="dark-modal"
 >
     <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div on:click|stopPropagation>
-        <slot name="content" />
-        <slot />
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div onclick={(e) => e.stopPropagation()} class="bg-base-200 p-4 rounded-lg">
+        {@render content()}
     </div>
 </dialog>
 
@@ -31,6 +35,7 @@
         left: 50%;
         transform: translate(-50%, -50%);
         margin: 0;
+        z-index: 1000;
     }
     
     dialog::backdrop {

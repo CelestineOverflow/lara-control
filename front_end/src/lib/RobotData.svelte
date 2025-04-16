@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { robotJoints} from "$lib/robotics/coordinate";
+    import { robotJoints} from "$lib/robotics/coordinate.svelte";
     let toggle = "";
 </script>
 

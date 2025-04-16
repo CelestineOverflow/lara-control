@@ -53,26 +53,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-
-manager = ConnectionManager()
+active_websockets = []
+import traceback
+async def broadcast(message: dict):
+	global active_websockets
+	# Broadcast the message to all connected websockets
+	disconnected = []
+	for connection in active_websockets:
+		try:
+			await connection.send_json(message)
+		except WebSocketDisconnect:
+			disconnected.append(connection)
+	for connection in disconnected:
+		if connection in active_websockets:  # Check if connection is still in the list
+			active_websockets.remove(connection)
 
 def generate_state():
     state = {}
@@ -84,7 +78,29 @@ def generate_state():
     state['daemon'] = {"pid": os.getpid(), "running": True, "debug": g_show}
     return json.dumps(state)
 
+@app.get("/restart_process")
+async def restart_process(script_name: str):
+    for p in processes:
+        if p.script_name == script_name:
+            p.restart()
+            return JSONResponse(content={"status": "success", "message": f"Process {script_name} restarted"})
+    return JSONResponse(content={"status": "error", "message": f"Process {script_name} not found"})
 
+@app.get("/kill_process")
+async def kill_process(script_name: str):
+    for p in processes:
+        if p.script_name == script_name:
+            p.kill()
+            return JSONResponse(content={"status": "success", "message": f"Process {script_name} killed"})
+    return JSONResponse(content={"status": "error", "message": f"Process {script_name} not found"})
+
+@app.get("/show_process")
+async def show_process(script_name: str):
+    for p in processes:
+        if p.script_name == script_name:
+            p.toggle_view()
+            return JSONResponse(content={"status": "success", "message": f"Process {script_name} debug set to {p.debug}"})
+    return JSONResponse(content={"status": "error", "message": f"Process {script_name} not found"})
 
 @app.get("/")
 async def root():
@@ -93,55 +109,17 @@ last_time = time.time()
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     global last_time
-    await manager.connect(websocket)
+    await websocket.accept()
+    active_websockets.append(websocket)
     while True:
+        last_time = time.time()
         try:
-            #check if there are messages incoming
-            try:
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=1)
-                print(f"Received data: {data}")
-                tokens = data.split(' ')
-                if 'stop' in tokens[0]:
-                    stop = False
-                    for p in processes:
-                        if p.script_name == tokens[1]:
-                            p.kill()
-                            stop = True
-                            break
-                    if not stop:
-                        print(f"Process {tokens[1]} not found")
-                elif 'restart' in tokens[0]:
-                    for p in processes:
-                        if p.script_name == tokens[1]:
-                            p.restart()
-                elif 'debug' in tokens[0]:
-                    for p in processes:
-                        if p.script_name == tokens[1]:
-                            if len(tokens) > 2:
-                                show = tokens[2] == 'true'
-                            else:  
-                                show = True
-                            p.debug = show
-                elif 'show' in tokens[0]:
-                    show = tokens[1] == 'true'
-                    show_console(show)
-                #clear the screen
-                elif 'clear' in tokens[0]:
-                    os.system('cls' if os.name == 'nt' else 'clear')
-                    print("Cleared screen")
-                elif 'die' in tokens[0]:
-                    if processes:
-                        for p in processes:
-                            p.kill()
-                    exit()
-            except asyncio.TimeoutError:
-                pass
-            last_time = time.time()
-            await manager.broadcast(generate_state())
-            await asyncio.sleep(1)
+            await broadcast(generate_state())
         except WebSocketDisconnect:
-            manager.disconnect(websocket)
-            break  # Exit the loop when WebSocket is disconnected
+            if websocket in active_websockets:
+                active_websockets.remove(websocket)
+            break 
+        await asyncio.sleep(1)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process manager')
@@ -160,14 +138,14 @@ if __name__ == "__main__":
         allow_headers=["*"],
     )
 
-    HOST = "localhost"
+    HOST = "192.168.2.209"  # Default IP address
 
     if args.host:
         import socket
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
         HOST = socket.gethostbyname(socket.gethostname())
-
-    uvicorn.run(app, host=HOST, port=args.port)
     print(f"Running process manager server => {HOST}:{args.port}")
+    uvicorn.run(app, host=HOST, port=args.port)
+
     register_mdns_service(args.service_name, args.port)

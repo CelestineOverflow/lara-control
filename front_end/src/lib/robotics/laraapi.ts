@@ -2,7 +2,7 @@
 import socketIOClient from 'socket.io-client';
 import { get, writable } from 'svelte/store';
 import { toRad } from './utils';
-import { error, isPaused, Pose, robotJoints, TargetPose, trayPoses } from '$lib/robotics/coordinate';
+import { error, isPaused, Pose, robotJoints, TargetPose, trayPoses } from '$lib/robotics/coordinate.svelte';
 import { Vector3, Quaternion } from 'three';
 //very important  npm install socket.io-client@2 --save
 let isConnected = false;

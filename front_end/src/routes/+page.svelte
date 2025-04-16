@@ -5,23 +5,17 @@
 	import PressureChart from '$lib/pressureChart.svelte';
 	import TemperatureChart from '$lib/temperatureChart.svelte';
 	import Overlay from '$lib/Overlay.svelte';
+	import Complete from '$lib/Complete.svelte';
 </script>
 
+
+
 <Splitpanes style="height: 92vh" theme="invisible-theme">
-	<Pane size={60} snapSize={10}>
-		<Splitpanes horizontal={true} theme="invisible-theme">
-		<!-- Render View Panel -->
-		<Pane size={50} snapSize={30}>
-			<Render />
-		</Pane>
-		<!-- Video Stream Panel -->
-		<Pane size={50} snapSize={30}>
-			<Overlay />
-		</Pane>
-		</Splitpanes>
+	<Pane size={80} snapSize={10}>
+		<Overlay />
 	</Pane>
 	<!-- Charts Panel -->
-	<Pane size={25} snapSize={10}>
+	<Pane size={28} snapSize={10}>
 		<Splitpanes horizontal={true} theme="invisible-theme">
 			<!-- Pressure Chart -->
 			<Pane minSize={10}>

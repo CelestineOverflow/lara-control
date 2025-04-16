@@ -577,11 +577,11 @@ def	add_vertical_gradient(image, top_value=1.3,	bottom_value=1.0):
 	return gradient_img
 
 
-def	detector_superimpose(img, detector,	tag_size=0.014,	current_camera_index=0):
+def	detector_superimpose(img, detector,	tag_size=0.014):
 	global last_tag_data, current_setting_resolution, change_camera_flag, close_up_resolution, far_resolution, offset_tag
 
 	gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-	img	= undistort_image(img, mtx,	dist)
+	# img	= undistort_image(img, mtx,	dist)
 
 	detections = detector.detect(
 		gray,
@@ -773,7 +773,7 @@ def	camera_loop():
 				frame, binary_mask = square_superimpose(frame)
 			elif state == "tag_detector":
 				frame, detections =	detector_superimpose(
-					frame, at_detector,	0.0115582191781, camera_indices[current_camera_index]
+					frame, at_detector,	0.0115582191781
 				)
 				if detections:
 					current_data = detections
@@ -810,6 +810,8 @@ def	camera_loop():
 				cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
 
 			stream.set_frame(resized)
+
+			print(round(stream.get_bandwidth() / 1024, 2), "KB/s", end="\r")
 
 	# When we exit the while loop or get a stop	signal,	shut down
 	print("Exiting camera_loop()...")

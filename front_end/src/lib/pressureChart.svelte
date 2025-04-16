@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { loadcell_value } from '$lib/robotics/coordinate';
+	import { loadcell_value } from '$lib/robotics/coordinate.svelte';
 	import ChartWorker from './ChartWorker.ts?worker';
 	import { press } from '$lib/robotics/laraapi';
 

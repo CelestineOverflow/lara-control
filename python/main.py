@@ -1,9 +1,10 @@
 from typing	import Dict, Union,	Optional
 from fastapi import	FastAPI, WebSocket
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from pydantic import BaseModel
 from contextlib	import asynccontextmanager
 from fastapi.middleware.cors import	CORSMiddleware
+from starlette.websockets import WebSocketDisconnect
 import asyncio
 from typing	import List
 from tray import Tray
@@ -57,17 +58,13 @@ def	reader():
 	flag_warning_sent = False
 	start_time = time.time()
 	while not stop_event.is_set():
-		if serial_handler and not serial_handler.output.empty():
-			json_data =	serial_handler.output.get()
+		if serial_handler.has_new_data():
+			json_data = serial_handler.read()
 			if not first_data_json:
 				first_data_json	= json_data
 			json_data_consumed = False
 			unblock_start_time = None
 			if lara is not None:
-				if lara.robot.program_status() == "PAUSED":
-					print("Robot is paused")
-				if lara.collided:
-					print("Robot collided")
 				if "force" in json_data:
 					force =	float(json_data["force"])
 					if force > threshold and lara is not None and not flag_error_sent:
@@ -133,7 +130,6 @@ def	read_root():
 	return RedirectResponse(url="/docs")
 
 active_websockets = []
-
 async def broadcast(message: dict):
 	global active_websockets
 	# Broadcast the message to all connected websockets
@@ -141,11 +137,18 @@ async def broadcast(message: dict):
 	for connection in active_websockets:
 		try:
 			await connection.send_json(message)
+		except WebSocketDisconnect:
+			# Client has disconnected, add to list for removal
+			disconnected.append(connection)
 		except Exception as e:
-			print("Broadcast error, removing websocket:", e)
+			error_traceback = traceback.format_exc()
+			print(f"Error sending message to websocket error: {e}")
+			print(f"Traceback: {error_traceback}")
+			disconnected.append(connection)
 			disconnected.append(connection)
 	for connection in disconnected:
-		active_websockets.remove(connection)
+		if connection in active_websockets:  # Check if connection is still in the list
+			active_websockets.remove(connection)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -154,49 +157,34 @@ async def websocket_endpoint(websocket: WebSocket):
 	await websocket.accept()
 	active_websockets.append(websocket)
 	last_time = current_milli_time()
-	last_time_between = current_milli_time()
-	# Send the first data json to all clients
+
 	if first_data_json:
 		print("Sending first data json: " + str(first_data_json))
 		await broadcast(first_data_json)
 	
-	try:
-		while True:
-			if not json_data_consumed and json_data is not None:
-				await broadcast(json_data)
-				json_data_consumed = True
-				counter += 1
-			if not error_queue.empty():
-					error = error_queue.get()
-					await broadcast({
-						"error": {
-							"error_code": error[0],
-							"error_message": error[1]
-						}
-					})
-			if not warning_queue.empty():
-				warning = warning_queue.get()
+	while True:
+		if not json_data_consumed and json_data is not None:
+			last_time = current_milli_time()
+			await broadcast(json_data)
+			json_data_consumed = True
+			counter += 1
+		if not error_queue.empty():
+				error = error_queue.get()
 				await broadcast({
-					"warning": {
-						"warning_code": warning[0],
-						"warning_message": warning[1]
+					"error": {
+						"error_code": error[0],
+						"error_message": error[1]
 					}
 				})
-			if current_milli_time() - last_time > 500:
-				await broadcast({"autonomous_control": autonomous_control_flag})
-				last_time = current_milli_time()
-			#print time between loops
-			# print(f"Time between loops: {current_milli_time() - last_time_between}")
-			time_between = current_milli_time() - last_time_between
-			if time_between > 50:
-				print(f"Time between loops: {time_between}")
-			last_time_between = current_milli_time()
-			await asyncio.sleep(0.03)
-	except Exception as e:
-		print("Websocket exception:", e)
-	finally:
-		if websocket in active_websockets:
-			active_websockets.remove(websocket)
+		if not warning_queue.empty():
+			warning = warning_queue.get()
+			await broadcast({
+				"warning": {
+					"warning_code": warning[0],
+					"warning_message": warning[1]
+				}
+			})
+		await asyncio.sleep(0.001)
 
 @app.post("/setPause")
 def	set_pause(pause: bool):
@@ -585,14 +573,13 @@ async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300
 	# Store starting position
 	start_position = lara.current_pose_raw().position
 	await lara.set_translation_speed_mms(1)
-	MAX_DEPTH = 0.010  # 10mm or 0.01m
+	MAX_DEPTH = 0.020  # 10mm or 0.01m
 	
 	# First stage: Move down continuously until near target pressure
 	print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
 	
 	counter = 0
 	while True:
-		print(f"Height: {lara.current_pose_raw().position.z * 1000} mm")
 		
 		# Check maximum depth for safety
 		if  lara.current_pose_raw().position.z - start_position.z < -MAX_DEPTH:
@@ -684,6 +671,64 @@ def emergency_stop():
 	lara.robot.power('off')
 	emit_warning(1, "Emergency stop triggered")
 	return {"success": "Emergency stop"}
+
+API_FILE = "arm_api.py"
+
+@app.get("/api_version")
+def api_version():
+	global API_FILE
+	if os.path.exists(API_FILE):
+		with open(API_FILE, 'r') as file:
+			for line in file:
+				if line.startswith('__version__'):
+					version = line.split('=')[1].strip().strip('"').strip("'")
+					return {"version": version}
+				
+@app.get("/api_module")
+def api_module():
+	global API_FILE
+	if os.path.exists(API_FILE):
+		return FileResponse(API_FILE)
+	else:
+		return {"error": "API module not found"}
+	
+@app.get("/api_download")
+def api_download():
+	global API_FILE
+	if os.path.exists(API_FILE):
+		return FileResponse(API_FILE, media_type='application/octet-stream', filename=API_FILE)
+	else:
+		return {"error": "API module not found"}
+
+@app.post("/setHeater")
+def	setHeater(newHeat :	int):
+	global serial_handler
+	serial_handler.write(f'{{"setTemp":	{newHeat}}}')
+	return {"setTemp": newHeat}
+
+
+@app.post("/wait_for_temperature")
+async def wait_for_temperature(newHeat : int):
+	if newHeat < 60 or newHeat > 250:
+		return {"error": "Temperature must be between 60 and 250"}
+	global serial_handler
+	serial_handler.write(f'{{"setTemp":	{newHeat}}}')
+	start_time = time.time()
+	while True:
+		if json_data is not None and "temperature" in json_data:
+			print(f"Current temperature: {json_data['temperature']}")
+			temperature_dict = json_data["temperature"]
+			current_temperature = temperature_dict["current"]
+			#check if temperature is within 1 degree of target
+			if abs(current_temperature - newHeat) < 1:
+				print("Temperature reached")
+				return {"success": "Temperature reached"}
+
+		if time.time() - start_time > 60*5:  # 5 minutes timeout
+			print("Timeout waiting for temperature")
+			serial_handler.write(f'{{"setTemp":	{0}}}')
+			return {"error": "Timeout waiting for temperature"}
+		await asyncio.sleep(1)
 
 @app.post("/zero_rotation")
 async def zero_rotation():

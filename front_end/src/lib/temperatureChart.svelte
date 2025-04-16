@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { temperature } from '$lib/robotics/coordinate';
+	import { temperature } from '$lib/robotics/coordinate.svelte';
   import { onMount } from "svelte";
   import ChartWorker from './ChartWorker.ts?worker'; 
 	import { setHeater } from './robotics/laraapi';

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import CartesianPad from "$lib/CartesianPad.svelte";
-	import { autonomous_control } from "./robotics/coordinate";
+	import { autonomous_control } from "./robotics/coordinate.svelte";
 	import { goToSocket, setSocket, setTray, togglePump } from "./robotics/laraapi";
 	import Tray from "./Tray.svelte";
 

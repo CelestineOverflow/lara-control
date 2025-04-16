@@ -3,8 +3,8 @@
 
 static float fifo[FIFO_SIZE];
 
-long SCALE_CALIBRATION_OFFSET = -159795;
-float SCALE_CALIBRATION_FACTOR = 231.0983;
+long SCALE_CALIBRATION_OFFSET = -11807;
+float SCALE_CALIBRATION_FACTOR = 165.0; // 1kg = 89.0 counts
 
 
 static void fifo_init()
@@ -48,17 +48,17 @@ void initHX71708()
   pinMode(HX717_SCK_PIN, OUTPUT);
   pinMode(HX717_DOUT_PIN, INPUT);
   digitalWrite(HX717_SCK_PIN, LOW);
-  tare();
   fifo_init();
 }
 
 long readRaw()
 {
+  long reading = 0;
   // Wait for DOUT to go LOW
   if (digitalRead(HX717_DOUT_PIN) == LOW)
   {
     delayMicroseconds(10);
-    long reading = 0;
+    
 
     // Read 24 bits
     for (int i = 0; i < 24; i++)
@@ -83,15 +83,26 @@ long readRaw()
       delayMicroseconds(1);
       digitalWrite(HX717_SCK_PIN, LOW);
     }
-    return reading;
   }
-  return NAN;
+  //invert the sign of the reading
+  return -reading;
+}
+
+long readOffset()
+{
+  long reading = readRaw();
+  if ((reading) != 0) 
+  {
+    float _reading = (reading + SCALE_CALIBRATION_OFFSET);
+    return _reading;
+  }
+  return 0;
 }
 
 float readProcessed()
 {
   long reading = readRaw();
-  if (!isnan(reading))
+  if ((reading) != 0) 
   {
     float _reading = (reading + SCALE_CALIBRATION_OFFSET);
     return _reading / SCALE_CALIBRATION_FACTOR;

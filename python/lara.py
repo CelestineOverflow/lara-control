@@ -562,7 +562,6 @@ class Lara:
 		with connect(link) as websocket:
 			websocket.send(json.dumps(data_stop_moving))
 			reply = websocket.recv()
-			print(f"Stop moving reply: {reply}")
 
 	
 	def start_moving(self, q0=0, q1=0, q2=0, q3=0, q4=0, q5=0, absrel="Absolute", reference="Base"):
@@ -581,7 +580,6 @@ class Lara:
 		with connect(link) as websocket:
 			websocket.send(json.dumps(data_start_moving))
 			reply = websocket.recv()
-			print(f"Start moving reply: {reply}")
 
 	
 if __name__	== "__main__":

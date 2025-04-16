@@ -4,10 +4,15 @@ import * as THREE from "three";
 import { writable, get } from "svelte/store";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RectAreaLightHelper } from "three/examples/jsm/helpers/RectAreaLightHelper.js";
-import { Lara } from "./robotics/lara";
-import { robotJoints, TargetPose, trayPoses, type Pose } from "$lib/robotics/coordinate";
-
+import { Lara } from "./robotics/lara.svelte";
+import { robotJoints, TargetPose, trayPoses, type Pose } from "$lib/robotics/coordinate.svelte";
+// Expose a store for the custom FOV
 // Shared scene and resources
+
+export const customFOV = writable(75);
+
+
+
 class RobotScene {
   scene: THREE.Scene;
   laraArm: Lara | null = null;
@@ -120,13 +125,23 @@ class RobotScene {
   }
 
   addSingleTargetMarker(pose: Pose) {
-    if (this.targetMarker) this.scene.remove(this.targetMarker);
+    // if (this.targetMarker) this.scene.remove(this.targetMarker);
     
-    const mesh = new THREE.Mesh(this.cubegeo, this.cubemat);
-    mesh.setRotationFromQuaternion(pose.rotation);
-    mesh.position.copy(pose.position);
-    this.scene.add(mesh);
-    this.targetMarker = mesh;
+    // const mesh = new THREE.Mesh(this.cubegeo, this.cubemat);
+    // mesh.setRotationFromQuaternion(pose.rotation);
+    // mesh.position.copy(pose.position);
+    // this.scene.add(mesh);
+    // this.targetMarker = mesh;
+    //add gtlf model instead of cube
+    if (this.targetMarker) this.scene.remove(this.targetMarker);
+    const loader = new GLTFLoader();
+    loader.load("gtlf/target.glb", (gltf) => {
+      this.targetMarker = gltf.scene;
+      this.targetMarker.scale.set(0.01, 0.01, 0.01);
+      this.targetMarker.setRotationFromQuaternion(pose.rotation);
+      this.targetMarker.position.copy(pose.position);
+      this.scene.add(this.targetMarker);
+    });
   }
 
   updateJoints() {
@@ -139,10 +154,17 @@ class RobotScene {
       this.laraArm.joint6.set(get(robotJoints).joint6);
     }
   }
+
+  setFOV(fov: number) {
+    if(this.laraArm) {
+      this.laraArm.camera.fov = fov;
+      this.laraArm.camera.updateProjectionMatrix();
+    }
+  }
 }
+
+
 
 // Create a singleton instance to be shared across components
 export const robotScene = new RobotScene();
 
-// Expose a store for the custom FOV
-export const customFOV = writable(75);
