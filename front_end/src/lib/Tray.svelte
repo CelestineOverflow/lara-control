@@ -29,15 +29,32 @@
 	let dragMode: 'select' | 'deselect' = 'select';
 	let startCell: {column: string, row: number} | null = null;
 	
-	// Generate Python code based on selected cells
-	$: pythonCode = `# Selected cells in tray
-selected = [
-${selectedCells.map(cell => `    "${cell.column}${cell.row}"`).join(',\n')}
-]
-# Example of how to process these cells
-for cell in selected:
-    print(f"Processing cell {cell}")
-    # Your code to handle each cell here`;
+
+	$: pythonCode = `import arm_api
+cells = [${(() => {
+	const groups = [];
+	const arr = selectedCells.map(cell => `"${cell.column}${cell.row}"`);
+	for (let i = 0; i < arr.length; i += 4) {
+		groups.push(arr.slice(i, i + 4).join(', '));
+	}
+	return groups.join(',\n');
+})()}]
+
+@arm_api.labhandler_sequence
+def testers_code():
+	print(f"cell at coordinates {cell.x}, {cell.y}")
+	# This function will be called for each cell in the grid
+	# it will be called on every cell
+	# you can define your own logic here
+	# down forget to turn on and off the power supplies!!
+	
+# Running tests over cells
+for cell in cells:
+	testers_code(cell)
+`;
+
+	
+	
 	// Update highlighted code whenever the Python code changes
 	$: {
 		if (typeof window !== 'undefined' && Prism) {
@@ -159,17 +176,20 @@ for cell in selected:
 	function clearSelections() {
 		selectedCells = [];
 	}
+
+
 	
 	function moveToCell(x: string, y: number) {
 		const _x = x.charCodeAt(0) - 65;
 		console.log(x, y);
-		const response = fetch(`http://192.168.2.209:1442/moveToCell?row=${_x}&col=${y}&offset_z=0`, {
+		const response = fetch(`http://192.168.2.209:1442/moveToCellSmart?row=${_x}&col=${y}&offset_z=0`, {
 			method: 'POST',
 			headers: {
 				accept: 'application/json'
 			}
 		});
 		console.log(response);
+		
 	}
 	
 	function generateWaypoints(
@@ -217,12 +237,7 @@ for cell in selected:
 	});
 </script>
 <!-- Trigger Button to Open Modal -->
-<button
-	on:click={() => (showModal = true)}
-	class="rounded bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
->
-	Select Tray
-</button>
+<button on:click={() => (showModal = true)} class="btn btn-soft btn-primary">Tray</button>
 <!-- Modal Component -->
 <Modal bind:showModal>
 	<!-- Remove any fixed width constraints and make sure content fills the modal -->

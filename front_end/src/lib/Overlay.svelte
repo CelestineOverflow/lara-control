@@ -100,6 +100,7 @@
 		alt="Robot Camera Feed"
 		class="full-size camera-feed"
 	/>
+	
 	<!-- Overlay canvas: will match the camera feed dimensions -->
 	<canvas bind:this={canvas_overlay} class="full-size" style="background: transparent;"></canvas>
   <div class="absolute left-0 top-0 z-10 m-2 w-1/3 h-1/3 aspect-square rounded-lg border border-white bg-transparent p-2">

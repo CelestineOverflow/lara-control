@@ -53,20 +53,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-active_websockets = []
-import traceback
-async def broadcast(message: dict):
-	global active_websockets
-	# Broadcast the message to all connected websockets
-	disconnected = []
-	for connection in active_websockets:
-		try:
-			await connection.send_json(message)
-		except WebSocketDisconnect:
-			disconnected.append(connection)
-	for connection in disconnected:
-		if connection in active_websockets:  # Check if connection is still in the list
-			active_websockets.remove(connection)
+
 
 def generate_state():
     state = {}
@@ -106,20 +93,48 @@ async def show_process(script_name: str):
 async def root():
     return HTMLResponse(content="<html><head><meta http-equiv='refresh' content='0; url=/docs'></head></html>")
 last_time = time.time()
+
+
+
+class ConnectionManager:
+	def __init__(self):
+		self.active_connections: list[WebSocket] = []
+
+	async def connect(self, websocket: WebSocket):
+		await websocket.accept()
+		self.active_connections.append(websocket)
+
+	def disconnect(self, websocket: WebSocket):
+		self.active_connections.remove(websocket)
+
+	async def send_personal_message(self, message: str, websocket: WebSocket):
+		await websocket.send_text(message)
+
+	async def broadcast(self, message):
+		if not isinstance(message, str):
+			message = json.dumps(message)
+		for connection in self.active_connections.copy():
+			try:
+				await connection.send_text(message)
+			except (WebSocketDisconnect, RuntimeError):
+				self.disconnect(connection)
+
+manager = ConnectionManager()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    global last_time
-    await websocket.accept()
-    active_websockets.append(websocket)
-    while True:
-        last_time = time.time()
-        try:
-            await broadcast(generate_state())
-        except WebSocketDisconnect:
-            if websocket in active_websockets:
-                active_websockets.remove(websocket)
-            break 
-        await asyncio.sleep(1)
+    await manager.connect(websocket)
+    try:
+        while True:
+            await manager.broadcast(generate_state())
+            await asyncio.sleep(0.2)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+
+
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process manager')

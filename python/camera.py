@@ -9,13 +9,14 @@ import threading
 import queue
 from scipy.spatial.transform import	Rotation
 from pupil_apriltags import	Detector
-from mjpeg_streamer	import MjpegServer,	Stream
+# from mjpeg_streamer	import MjpegServer,	Stream
 import time
 from fastapi import	FastAPI, WebSocket
 from contextlib	import asynccontextmanager
 from fastapi.middleware.cors import	CORSMiddleware
 from space import Euler, Vector3, Quaternion, Matrix4, Pose, PoseCartesian, Vector2, deg2rad, scale_values
 from lara import Lara
+from webrtc_streamer import WebRTCStreamer
 
 # -------------------- GLOBAL FLAGS	--------------------
 lara = Lara()
@@ -506,10 +507,10 @@ def	getAvailableCameras():
 
 at_detector	= Detector(
 	families="tag36h11",
-	nthreads=8,
+	nthreads=24,
 	quad_decimate=1.0,
 	quad_sigma=0.0,
-	refine_edges=1,
+	refine_edges=2,
 	decode_sharpening=1,
 	debug=0
 )
@@ -723,10 +724,20 @@ def	camera_loop():
 	global stop_camera_thread
 
 	# Start	your MJPEG server and streaming
-	stream = Stream("my_camera", size=(1280, 720), quality=50, fps=frame_rate)
-	server = MjpegServer(ip, 1692)
-	server.add_stream(stream)
-	server.start()
+
+	# Create the WebRTC streamer with high quality settings
+	streamer = WebRTCStreamer(
+		host="192.168.2.209", 
+		port=5176,
+		cors_origin="http://192.168.2.209:5173",
+		default_width=1920,
+		default_height=1080,
+		default_fps=30,
+		default_bitrate=10000  # 10 Mbps for high quality
+	)
+	# Add a stream
+	streamer.add_stream("default", 1920, 1080, 30, 5000)
+	streamer.start()
 
 	# Some initialization
 	camera_indices = list(camera_presets.keys())
@@ -808,14 +819,11 @@ def	camera_loop():
 				print("Entering	calibration	mode. Press	'x'	to exit	and	fit	polynomials.")
 				is_calibrating = True
 				cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
-
-			stream.set_frame(resized)
-
-			print(round(stream.get_bandwidth() / 1024, 2), "KB/s", end="\r")
-
+			streamer.set_frame(frame, "default")
+			# cv2.imshow("default", frame)
 	# When we exit the while loop or get a stop	signal,	shut down
 	print("Exiting camera_loop()...")
-	server.stop()
+	streamer.stop()
 	cap.release()
 	cv2.destroyAllWindows()
 

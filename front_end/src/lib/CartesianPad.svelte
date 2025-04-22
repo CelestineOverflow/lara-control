@@ -240,8 +240,6 @@
 		};
 	}
 
-
-
 	function stopAnimation() {
 		stopMoving();
 		currentAnimation = null;
@@ -285,13 +283,21 @@
 			</label>
 
 			{#if translationMode}
-    <input type="range" min="1.0" max="25.0" step="0.5" class="range range-primary range-xs" bind:value={linear_speed} on:change={() => setTranslationSpeed(linear_speed)} />
-      <p> Speed: {linear_speed} mm/s</p>
+				<input
+					type="range"
+					min="1.0"
+					max="25.0"
+					step="0.5"
+					class="range range-primary range-xs"
+					bind:value={linear_speed}
+					on:change={() => setTranslationSpeed(linear_speed)}
+				/>
+				<p>Speed: {linear_speed} mm/s</p>
 				<div class="controls-section">
 					<h3>Translation</h3>
 					<div class="controls-grid">
 						<button
-							on:mouseenter={() => startTranslationAnimation('z', 1)}
+							on:mouseenter={() => startTranslationAnimation('y', 1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('z', 1)}
 							on:mouseup={stopMoving}
@@ -301,7 +307,7 @@
 							Z+
 						</button>
 						<button
-							on:mouseenter={() => startTranslationAnimation('y', 1)}
+							on:mouseenter={() => startTranslationAnimation('z', 1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('y', 1)}
 							on:mouseup={stopMoving}
@@ -321,7 +327,7 @@
 							X+
 						</button>
 						<button
-							on:mouseenter={() => startTranslationAnimation('z', -1)}
+							on:mouseenter={() => startTranslationAnimation('y', -1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('z', -1)}
 							on:mouseup={stopMoving}
@@ -331,7 +337,7 @@
 							Z-
 						</button>
 						<button
-							on:mouseenter={() => startTranslationAnimation('y', -1)}
+							on:mouseenter={() => startTranslationAnimation('z', -1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('y', -1)}
 							on:mouseup={stopMoving}
@@ -354,13 +360,21 @@
 				</div>
 			{:else}
 				<!-- Rotation Controls -->
-        <input type="range" min="1.0" max="15.0" step="0.5" class="range range-secondary range-xs" bind:value={rotational_speed} on:change={() => setRotationalSpeed(rotational_speed)} />
-        <p> Speed: {rotational_speed } °/s</p>
+				<input
+					type="range"
+					min="1.0"
+					max="15.0"
+					step="0.5"
+					class="range range-secondary range-xs"
+					bind:value={rotational_speed}
+					on:change={() => setRotationalSpeed(rotational_speed)}
+				/>
+				<p>Speed: {rotational_speed} °/s</p>
 				<div class="controls-section">
 					<h3>Rotation</h3>
 					<div class="controls-grid">
 						<button
-							on:mouseenter={() => startRotationAnimation('c', 1)}
+							on:mouseenter={() => startRotationAnimation('b', 1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('c', 1)}
 							on:mouseup={stopMoving}
@@ -370,7 +384,7 @@
 							Rz+
 						</button>
 						<button
-							on:mouseenter={() => startRotationAnimation('b', 1)}
+							on:mouseenter={() => startRotationAnimation('c', 1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('b', 1)}
 							on:mouseup={stopMoving}
@@ -390,7 +404,7 @@
 							Rx+
 						</button>
 						<button
-							on:mouseenter={() => startRotationAnimation('c', -1)}
+							on:mouseenter={() => startRotationAnimation('b', -1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('c', -1)}
 							on:mouseup={stopMoving}
@@ -400,7 +414,7 @@
 							Rz-
 						</button>
 						<button
-							on:mouseenter={() => startRotationAnimation('b', -1)}
+							on:mouseenter={() => startRotationAnimation('c', -1)}
 							on:mouseleave={stopAnimation}
 							on:mousedown={() => startMoving('b', -1)}
 							on:mouseup={stopMoving}

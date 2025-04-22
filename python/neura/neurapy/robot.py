@@ -150,6 +150,7 @@ class Robot:
             "get_encoder_offsets",
             "set_sim_real",
             "reset_error",
+            "reset_warnings",
             "get_diagnostics",
             "get_errors",
             "get_warnings",

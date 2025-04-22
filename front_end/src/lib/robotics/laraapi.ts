@@ -2,8 +2,9 @@
 import socketIOClient from 'socket.io-client';
 import { get, writable } from 'svelte/store';
 import { toRad } from './utils';
-import { error, isPaused, Pose, robotJoints, TargetPose, trayPoses } from '$lib/robotics/coordinate.svelte';
+import { isPaused, Pose, robotJoints, TargetPose, trayPoses } from '$lib/robotics/coordinate.svelte';
 import { Vector3, Quaternion } from 'three';
+import { error, warning } from '$lib/NotificationsLib';
 //very important  npm install socket.io-client@2 --save
 let isConnected = false;
 export const lara_api_joint_stream = writable([0, 0, 0, 0, 0, 0]);
@@ -49,7 +50,20 @@ export function setupSocket() {
 
     //42["Error","Warning Cannot initialize the robot, please press the white reset button and try again, switching to simulation mode."]
     socket.on("Error", (data: any) => {
-        error.set(data);
+        //check this text
+        //Warning Communication Problem with GUI server! Jog Motion was stopped. Check the connection to the Teach Pendant!
+        if (data.includes("Warning Communication Problem with GUI server! Jog Motion was stopped. Check the connection to the Teach Pendant!")) {
+            return;
+        }
+        if (data.includes("Error")) {
+            error(data, 5000);
+            return;
+        }
+        if (data.includes("Warning")) {
+            warning(data, 5000);
+            return;
+        }
+        
     });
 
     //42["PowerStatus",{"data":"Power On"}]
@@ -224,6 +238,21 @@ export function resetCollision() {
     });
 }
 
+
+//42["restart_deployer",{"data":true}]
+export function restartDeployer() {
+    socket.emit("restart_deployer", {
+        data: true,
+    });
+}
+
+//42["reboot",{"data":true}]	
+export function reboot() {
+    socket.emit("reboot", {
+        data: true,
+    });
+}
+
 export function startMovement() {
     socket.emit("JointGotoManual", {
         q0: get(lara_api_joint_stream)[0],
@@ -265,7 +294,6 @@ export function stopMovement() {
         reference: "nil",
         absrel: "Absolute",
     });
-    // console.log("Sent 'JointGotoManual' stop event.");
 }
 
 
@@ -289,36 +317,6 @@ export function powerOnOff(status: boolean) {
     socket.emit("PowerOnOff", {
         robotStatus: status,
     });
-}
-
-
-
-
-
-
-export async function resetRobotArmSide() {
-    try {
-        
-        const response = await fetch("http://192.168.2.13:8081/api/program-state", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                "startTime": 0,
-                "currentState": 0,
-                "programName": "",
-                "totalRunningTime": 0,
-                "currentProgramRoute": ""
-              }),
-        });
-        console.log(response);
-            
-
-    }
-    catch (error) {
-        console.error("Error:", error);
-    }
 }
 
 export async function setTray() {
@@ -397,7 +395,7 @@ export async function getOffsetX() {
 }
 
 export async function goToSocket() {
-    const response = await fetch("http://192.168.2.209:1442/moveToSocket?offset_z=0", {
+    const response = await fetch("http://192.168.2.209:1442/moveToSocketSmart?offset_z=0", {
         method: "POST",
         headers: {
             "accept": "application/json",

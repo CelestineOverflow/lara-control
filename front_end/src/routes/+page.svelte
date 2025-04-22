@@ -1,18 +1,16 @@
 <script lang="ts">
 	import { Pane, Splitpanes } from 'svelte-splitpanes';
 	import Control from '$lib/Control.svelte';
-	import Render from '$lib/Render.svelte';
 	import PressureChart from '$lib/pressureChart.svelte';
 	import TemperatureChart from '$lib/temperatureChart.svelte';
-	import Overlay from '$lib/Overlay.svelte';
-	import Complete from '$lib/Complete.svelte';
+	import OverlayWebrtc from '$lib/Overlay_webrtc.svelte';
 </script>
 
 
 
 <Splitpanes style="height: 92vh" theme="invisible-theme">
 	<Pane size={80} snapSize={10}>
-		<Overlay />
+		<OverlayWebrtc />
 	</Pane>
 	<!-- Charts Panel -->
 	<Pane size={28} snapSize={10}>

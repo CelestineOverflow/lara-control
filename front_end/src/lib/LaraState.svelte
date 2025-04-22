@@ -5,8 +5,9 @@
 		powerOnOff,
 		resetCollision,
 		lara_simulated_status,
+		simulateReal
 
-		resetRobotArmSide
+
 
 	} from '$lib/robotics/laraapi';
 </script>
@@ -36,7 +37,9 @@
 		</li>
 	{:else}
 		<li>
-			<button class="btn btn-warning">Simulated</button>
+			<button on:click={() => simulateReal(true)} class="btn btn-warning">Simulated</button>
 		</li>
 	{/if}
+	
+
 </ul>

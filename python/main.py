@@ -1,10 +1,9 @@
 from typing	import Dict, Union,	Optional
-from fastapi import	FastAPI, WebSocket
+from fastapi import	FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse, FileResponse
 from pydantic import BaseModel
 from contextlib	import asynccontextmanager
 from fastapi.middleware.cors import	CORSMiddleware
-from starlette.websockets import WebSocketDisconnect
 import asyncio
 from typing	import List
 from tray import Tray
@@ -20,6 +19,7 @@ import time
 import queue
 import logging
 import traceback
+import json
 # --- Global variables ---
 
 serial_handler = None
@@ -56,14 +56,14 @@ def	reader():
 	serial_handler.write('{"connected":	1}')
 	flag_error_sent = False
 	flag_warning_sent = False
-	start_time = time.time()
+	unblock_start_time = None
 	while not stop_event.is_set():
 		if serial_handler.has_new_data():
 			json_data = serial_handler.read()
 			if not first_data_json:
 				first_data_json	= json_data
 			json_data_consumed = False
-			unblock_start_time = None
+		
 			if lara is not None:
 				if "force" in json_data:
 					force =	float(json_data["force"])
@@ -78,12 +78,16 @@ def	reader():
 					else:
 						flag_error_sent = False
 						flag_warning_sent = False
+					
 					if unblock_pressure_flag:
+						# print(f"Unblock pressure flag is set, force: {force}, force type: {type(force)}, threshold: {threshold}, threshold type: {type(threshold)} eval = {force <(threshold_default/2)}")
+						##Unblock pressure flag is set, force: -294.4945
 						if force <(threshold_default/2):
 							if unblock_start_time is None:
 								unblock_start_time = current_milli_time()
+								# print(f"Unblock start time: {unblock_start_time}")
 							else:
-								if current_milli_time() - unblock_start_time > 2000:
+								if current_milli_time() - unblock_start_time > 3000:
 									unblock_pressure_flag = False
 									threshold = threshold_default
 									unblock_start_time = None
@@ -129,62 +133,69 @@ class GenerateTrayRequest(BaseModel):
 def	read_root():
 	return RedirectResponse(url="/docs")
 
-active_websockets = []
-async def broadcast(message: dict):
-	global active_websockets
-	# Broadcast the message to all connected websockets
-	disconnected = []
-	for connection in active_websockets:
-		try:
-			await connection.send_json(message)
-		except WebSocketDisconnect:
-			# Client has disconnected, add to list for removal
-			disconnected.append(connection)
-		except Exception as e:
-			error_traceback = traceback.format_exc()
-			print(f"Error sending message to websocket error: {e}")
-			print(f"Traceback: {error_traceback}")
-			disconnected.append(connection)
-			disconnected.append(connection)
-	for connection in disconnected:
-		if connection in active_websockets:  # Check if connection is still in the list
-			active_websockets.remove(connection)
+class ConnectionManager:
+	def __init__(self):
+		self.active_connections: list[WebSocket] = []
+
+	async def connect(self, websocket: WebSocket):
+		await websocket.accept()
+		self.active_connections.append(websocket)
+
+	def disconnect(self, websocket: WebSocket):
+		self.active_connections.remove(websocket)
+
+	async def send_personal_message(self, message: str, websocket: WebSocket):
+		await websocket.send_text(message)
+
+	async def broadcast(self, message):
+		if not isinstance(message, str):
+			message = json.dumps(message)
+		for connection in self.active_connections.copy():
+			try:
+				await connection.send_text(message)
+			except (WebSocketDisconnect, RuntimeError):
+				self.disconnect(connection)
+
+manager = ConnectionManager()
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-	global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json, autonomous_control_flag
-	counter = 0
-	await websocket.accept()
-	active_websockets.append(websocket)
-	last_time = current_milli_time()
+	global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json, autonomous_control_flag, unblock_pressure_flag
+	await manager.connect(websocket)
+	last_time = time.time()
 
-	if first_data_json:
-		print("Sending first data json: " + str(first_data_json))
-		await broadcast(first_data_json)
-	
-	while True:
-		if not json_data_consumed and json_data is not None:
-			last_time = current_milli_time()
-			await broadcast(json_data)
-			json_data_consumed = True
-			counter += 1
-		if not error_queue.empty():
-				error = error_queue.get()
-				await broadcast({
-					"error": {
-						"error_code": error[0],
-						"error_message": error[1]
+	try:
+		while True:
+			if not json_data_consumed and json_data is not None:
+				await manager.broadcast(json_data)
+				json_data_consumed = True
+			if not error_queue.empty():
+					error = error_queue.get()
+					await manager.broadcast({
+						"error": {
+							"error_code": error[0],
+							"error_message": error[1]
+						}
+					})
+			if not warning_queue.empty():
+				warning = warning_queue.get()
+				await manager.broadcast({
+					"warning": {
+						"warning_code": warning[0],
+						"warning_message": warning[1]
 					}
 				})
-		if not warning_queue.empty():
-			warning = warning_queue.get()
-			await broadcast({
-				"warning": {
-					"warning_code": warning[0],
-					"warning_message": warning[1]
-				}
-			})
-		await asyncio.sleep(0.001)
+			
+			if time.time() - last_time > 0.5: # Send status every 0.5 seconds
+				await manager.broadcast({
+					"threshold": threshold,
+					"unblock_pressure_flag": unblock_pressure_flag,
+				})
+				last_time = time.time()
+			await asyncio.sleep(0.001)
+	except WebSocketDisconnect:
+		manager.disconnect(websocket)
+
 
 @app.post("/setPause")
 def	set_pause(pause: bool):
@@ -355,6 +366,109 @@ def	tare():
 	serial_handler.write(f'{{"tare": 1}}')
 	return {"success": "Tare command sent"}
 
+
+@app.post("/to_tray")
+async def to_tray():
+	global lara, tray
+	cell_a0 = tray.get_cell_robot_orientation(0, 0)
+	cell_a0_position = cell_a0.position
+	#compute headint using x and y
+	heading_tray = np.arctan2(cell_a0_position.y, cell_a0_position.x)
+	current_joint_angles = await lara.async_robot.get_current_joint_angles()
+	lara.robot.set_mode("Automatic")
+	try:
+		joint_property = {
+			"speed": 50.0,
+			"acceleration": 3.0,
+			"safety_toggle": True,
+			"target_joint": [
+				[
+					current_joint_angles[0],
+					current_joint_angles[1],
+					current_joint_angles[2],
+					current_joint_angles[3],
+					current_joint_angles[4],
+					current_joint_angles[5]
+				],
+				[
+					current_joint_angles[0],
+					-0.056414989727909474,
+					1.5068518732631686,
+					0.0006344149059273136,
+					1.6912666241349086,
+					2.322130079912925
+				],
+				[
+					heading_tray,
+					-0.056414989727909474,
+					1.5068518732631686,
+					0.0006344149059273136,
+					1.6912666241349086,
+					2.322130079912925
+				]
+				
+			],
+			"current_joint_angles":  lara.robot.get_current_joint_angles()
+		}
+		await asyncio.to_thread(lara.robot.move_joint, **joint_property)
+		lara.robot.stop() # if there are multiple motions than,this needs to be called only once at the end of the script
+		lara.robot.set_mode("Teach")
+		return {"success": "ok"}
+	except Exception as e:
+		error = str(e)
+		emit_error(1, error)
+		return {"error": "IK Failure"}
+	
+@app.post("/to_socket")
+async def to_socket():
+	global lara, socket_pose
+	socket_position = socket_pose.position
+	heading_socket = np.arctan2(socket_position.y, socket_position.x)
+	current_joint_angles = await asyncio.to_thread(lara.robot.get_current_joint_angles)
+	await asyncio.to_thread(lara.robot.set_mode, "Automatic")
+	try: 
+		joint_property = {
+				"speed": 50.0,
+				"acceleration": 3.0,
+				"safety_toggle": True,
+				"target_joint": [
+					[
+						current_joint_angles[0],
+						current_joint_angles[1],
+						current_joint_angles[2],
+						current_joint_angles[3],
+						current_joint_angles[4],
+						current_joint_angles[5]
+					],
+					[
+						current_joint_angles[0],
+						-0.056414989727909474,
+						1.5068518732631686,
+						0.0006344149059273136,
+						1.6912666241349086,
+						2.322130079912925
+					],
+					[
+						heading_socket,
+						-0.056414989727909474,
+						1.5068518732631686,
+						0.0006344149059273136,
+						1.6912666241349086,
+						2.322130079912925
+					]
+					
+				],
+				"current_joint_angles":  lara.robot.get_current_joint_angles()
+			}
+		await asyncio.to_thread(lara.robot.move_joint, **joint_property)
+		lara.robot.stop()
+		lara.robot.set_mode("Teach")
+		return {"success": "ok"}
+	except Exception as e:
+		error = str(e)
+		emit_error(1, error)
+		return {"error": "IK Failure"}
+
 @app.post("/retract")
 async def retract(distance = -0.15):
 	global lara, socket_pose, json_data, threshold, threshold_default, unblock_pressure_flag
@@ -459,109 +573,83 @@ async def move_to_socket():
 		emit_error(1, f"Error during first-time socket move: {str(e)}")
 		return {"error": f"Error during first-time socket move: {str(e)}"}
 	
-
-
-@app.post("/to_tray")
-async def to_tray():
-	global lara, tray
-	cell_a0 = tray.get_cell_robot_orientation(0, 0)
-	cell_a0_position = cell_a0.position
-	#compute headint using x and y
-	heading_tray = np.arctan2(cell_a0_position.y, cell_a0_position.x)
-	current_joint_angles = await lara.async_robot.get_current_joint_angles()
-	lara.robot.set_mode("Automatic")
-	try:
-		joint_property = {
-			"speed": 50.0,
-			"acceleration": 3.0,
-			"safety_toggle": True,
-			"target_joint": [
-				[
-					current_joint_angles[0],
-					current_joint_angles[1],
-					current_joint_angles[2],
-					current_joint_angles[3],
-					current_joint_angles[4],
-					current_joint_angles[5]
-				],
-				[
-					current_joint_angles[0],
-					-0.056414989727909474,
-					1.5068518732631686,
-					0.0006344149059273136,
-					1.6912666241349086,
-					2.322130079912925
-				],
-				[
-					heading_tray,
-					-0.056414989727909474,
-					1.5068518732631686,
-					0.0006344149059273136,
-					1.6912666241349086,
-					2.322130079912925
-				]
-				
-			],
-			"current_joint_angles":  lara.robot.get_current_joint_angles()
-		}
-		await asyncio.to_thread(lara.robot.move_joint, **joint_property)
-		lara.robot.stop() # if there are multiple motions than,this needs to be called only once at the end of the script
-		lara.robot.set_mode("Teach")
-		return {"success": "ok"}
-	except Exception as e:
-		error = str(e)
-		emit_error(1, error)
-		return {"error": "IK Failure"}
-	
-@app.post("/to_socket")
-async def to_socket():
+@app.get("/distance_to_socket")
+def distance_to_socket():
 	global lara, socket_pose
-	socket_position = socket_pose.position
-	heading_socket = np.arctan2(socket_position.y, socket_position.x)
-	current_joint_angles = await asyncio.to_thread(lara.robot.get_current_joint_angles)
-	await asyncio.to_thread(lara.robot.set_mode, "Automatic")
-	try: 
-		joint_property = {
-				"speed": 50.0,
-				"acceleration": 3.0,
-				"safety_toggle": True,
-				"target_joint": [
-					[
-						current_joint_angles[0],
-						current_joint_angles[1],
-						current_joint_angles[2],
-						current_joint_angles[3],
-						current_joint_angles[4],
-						current_joint_angles[5]
-					],
-					[
-						current_joint_angles[0],
-						-0.056414989727909474,
-						1.5068518732631686,
-						0.0006344149059273136,
-						1.6912666241349086,
-						2.322130079912925
-					],
-					[
-						heading_socket,
-						-0.056414989727909474,
-						1.5068518732631686,
-						0.0006344149059273136,
-						1.6912666241349086,
-						2.322130079912925
-					]
-					
-				],
-				"current_joint_angles":  lara.robot.get_current_joint_angles()
-			}
-		await asyncio.to_thread(lara.robot.move_joint, **joint_property)
-		lara.robot.stop()
-		lara.robot.set_mode("Teach")
-		return {"success": "ok"}
-	except Exception as e:
-		error = str(e)
-		emit_error(1, error)
-		return {"error": "IK Failure"}
+	if socket_pose is None:
+		raise ValueError("Socket pose not set")
+	current_pose = lara.current_pose_raw()
+	dx = socket_pose.position.x - current_pose.position.x
+	dy = socket_pose.position.y - current_pose.position.y
+	dz = socket_pose.position.z - current_pose.position.z
+	dxy = np.sqrt(dx**2 + dy**2)
+	distance = np.sqrt(dx**2 + dy**2 + dz**2)
+	return {
+		"distance": distance,
+		"dx": dx,
+		"dy": dy,
+		"dz": dz,
+		"dxy": dxy
+	}
+
+@app.get("/distance_to_cell")
+def distance_to_cell(row: int = 0, col: int = 0):
+	global lara, tray
+	if tray is None:
+		raise ValueError("Tray not set")
+	cell_pose = tray.get_cell_robot_orientation(row, col)
+	current_pose = lara.current_pose_raw()
+	dx = cell_pose.position.x - current_pose.position.x
+	dy = cell_pose.position.y - current_pose.position.y
+	dz = cell_pose.position.z - current_pose.position.z
+	dxy = np.sqrt(dx**2 + dy**2)
+	distance = np.sqrt(dx**2 + dy**2 + dz**2)
+	return {
+		"distance": distance,
+		"dx": dx,
+		"dy": dy,
+		"dz": dz,
+		"dxy": dxy
+	}
+
+
+@app.post("/moveToSocketSmart")
+async def move_to_socket_smart():
+	global lara, socket_pose, json_data, firstTimeSocketMove, tag_pose
+	if socket_pose is None:
+		return {"error": "Socket pose not set"}
+	current_pose = lara.current_pose_raw()
+	#if we are at below the soocket pose in z plus 0.3 then we first retract 0.3m
+	if current_pose.position.z < socket_pose.position.z + 0.3:
+		await asyncio.to_thread(lara.retract, -0.3)
+	#we then check how far we are from the socket pose in x and y
+	distance = distance_to_socket()
+	if distance["dxy"] > 0.5:
+		#we use move to socket
+		await to_socket()
+	#finally we move to the socket pose without retracting
+	await move_to_socket_retract()
+	return {"success": "Moved to socket"}
+
+@app.post("/moveToCellSmart")
+async def move_to_cell_smart(row: int = 0, col: int = 0):
+	global lara, socket_pose, json_data
+	cell_pose = tray.get_cell_robot_orientation(row, col)
+	if cell_pose is None:
+		return {"error": "Cell pose not set"}
+	current_pose = lara.current_pose_raw()
+	#if we are at below the cell pose in z plus 0.3 then we first retract 0.3m
+	if current_pose.position.z < cell_pose.position.z + 0.3:
+		await asyncio.to_thread(lara.retract, -0.3)
+	#we then check how far we are from the cell pose in x and y
+	distance = distance_to_cell(row, col)
+	if distance["dxy"] > 0.5:
+		#we use move to cell
+		await to_tray()
+	error = await asyncio.to_thread(lara.move_to_pose_from_retract, tray.get_cell_robot_orientation(row, col))
+	if error:
+		return {"error": error}
+	return {"success": "Moved to cell"}
 
 @app.post("/moveUntilPressure")
 async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300.0):

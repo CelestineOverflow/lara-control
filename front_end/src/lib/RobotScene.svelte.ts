@@ -104,9 +104,9 @@ class RobotScene {
     rectLight3.position.set(5, 5, 5);
     this.scene.add(rectLight3);
     
-    this.scene.add(new RectAreaLightHelper(rectLight1));
-    this.scene.add(new RectAreaLightHelper(rectLight2));
-    this.scene.add(new RectAreaLightHelper(rectLight3));
+    // this.scene.add(new RectAreaLightHelper(rectLight1));
+    // this.scene.add(new RectAreaLightHelper(rectLight2));
+    // this.scene.add(new RectAreaLightHelper(rectLight3));
   }
 
   addTrayMarkers(poses: Pose[]) {

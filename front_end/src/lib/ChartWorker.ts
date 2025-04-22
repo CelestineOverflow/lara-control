@@ -7,10 +7,10 @@ self.onmessage = (event) => {
 
   switch (data.type) {
     case "init": {
-      /**
-       * The main thread sends:
-       * { type: "init", canvas: offscreenCanvas }
-       */
+      if (chart) {
+        chart.destroy();
+        chart = null;
+      }
       const { canvas } = data;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
@@ -51,6 +51,14 @@ self.onmessage = (event) => {
                 color: "rgba(255, 255, 255, 0.1)",
               },
             },
+            x: {
+              ticks: {
+                display: false,
+              },
+              grid: {
+                display: false,
+              }
+            },
           },
           plugins: {
             legend: { position: "top" },
@@ -74,17 +82,17 @@ self.onmessage = (event) => {
       const { currentForce, targetForce, dataIndex, maxDataPoints } = data.payload;
 
       // Add new data point
-      if (chart.data.labels) {
-        chart.data.labels.push(dataIndex.toString());
-      }
+      chart.data.labels?.push(dataIndex.toString());
       chart.data.datasets[0].data.push(currentForce);
       chart.data.datasets[1].data.push(targetForce);
 
-      // Remove old data points if limit is exceeded
-      if (chart.data.labels && chart.data.labels.length > maxDataPoints) {
-        chart.data.labels.shift();
-        chart.data.datasets[0].data.shift();
-        chart.data.datasets[1].data.shift();
+      // Remove old data points in a single splice to avoid memory leaks
+      const excess = (chart.data.labels?.length ?? 0) - maxDataPoints;
+      if (excess > 0) {
+      chart.data.labels?.splice(0, excess);
+      chart.data.datasets.forEach(ds => {
+        ds.data.splice(0, excess);
+      });
       }
 
       // Trigger a re-draw

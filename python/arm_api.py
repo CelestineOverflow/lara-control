@@ -4,7 +4,7 @@ import random
 import time
 from packaging import version
 from functools import wraps
-__version__ = "0.0.16"
+__version__ = "0.0.22"
 # URLs for fetching version and module
 version_url = "http://192.168.2.209:1442/api_version"
 module_url = "http://192.168.2.209:1442/api_module"
@@ -84,6 +84,13 @@ def notify_user(type: str, message: str):
         print(f"Failed to send notification: {e}")
         return
 
+def restart_script(script_name: str):
+    url = f'http://192.168.2.209:8765/restart_process?script_name={script_name}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        notify_user("Error", response.text)
+        raise Exception(response.text)
+    print(response.text)
 
 def to_socket():
     url = f'http://192.168.2.209:1442/to_socket'
@@ -141,11 +148,16 @@ def toggle_pump(state: bool):
         raise Exception(response.text)
     print(response.text)
 
-
-
-
 def move_to_socket():
     url = f'http://192.168.2.209:1442/moveToSocket'
+    response = requests.post(url)
+    if response.status_code != 200 or "error" in response.text.lower():
+        notify_user("Error", response.text)
+        raise Exception(response.text)
+    print(response.text)
+
+def move_to_socket_smart():
+    url = f'http://192.168.2.209:1442/moveToSocketSmart'
     response = requests.post(url)
     if response.status_code != 200 or "error" in response.text.lower():
         notify_user("Error", response.text)
@@ -221,12 +233,16 @@ class Cell:
                 cells.append(Cell(i, j))
         return cells
 
-    
+
+execution_counter = 0
+
 def labhandler_sequence(func):
     @wraps(func)
     def wrapper(cell, *args, **kwargs):
+        global execution_counter
         try:
             set_heater(0)
+            execution_counter += 1
             print(f'Testing cell x: {cell.x} y: {cell.y}')
             # Pre-test steps
             toggle_pump(False)
@@ -278,24 +294,28 @@ def labhandler_sequence(func):
                 move_until_pressure(1000, 300)
             to_tray()
             move_to_cell_retract(cell.x, cell.y)
-            for j in range(3):
+            MAX_RETRIES = 20
+            for j in range(MAX_RETRIES):
                 toggle_pump(False)
-                time.sleep(5)
+                time.sleep((j+1)*1) # from 1 to 20 seconds
                 toggle_pump(True)
-                time.sleep(1)
+                time.sleep(2)
                 pump_pressure = get_current_pump_pressure()
                 print(f'Pump pressure: {pump_pressure}')
                 if pump_pressure > 150:
                     break
-                else:
-                    raise Exception('Sample stuck in head')
+                if j == MAX_RETRIES - 1:
+                    notify_user("Error", f'sample stuck in plunger')
+                    raise Exception('sample stuck in plunger')
             toggle_pump(False)
             notify_user("Success", f'Tested cell x: {cell.x} y: {cell.y}')
+            if execution_counter >= 5:
+                print('Restarting camera.py, to avoid memory leak')
+                restart_script("camera.py")
+                time.sleep(30)
+                execution_counter = 0
         except Exception as e:
             print(f'Exception in test: {e}')
             notify_user("Error", f'Failed to test cell x: {cell.x} y: {cell.y}')
             raise e
     return wrapper
-
-
-# class LabHandler:

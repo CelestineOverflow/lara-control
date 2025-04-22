@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { writable, type Writable, get } from "svelte/store";
+import { error, warning } from "$lib/NotificationsLib";
 
 /**
  * Represents a waypoint with a unique name and a position in 3D space.
@@ -97,10 +98,10 @@ export const robotJoints: Writable<RobotJoints> = writable({
 let ws: WebSocket;
 
 export const isPaused: Writable<boolean> = writable(false);
-export const error: Writable<{}> = writable({});
-export const warning: Writable<{}> = writable({});
 export const torques: Writable<{}> = writable({});
 export const autonomous_control: Writable<boolean> = writable(false);
+export const threshold: Writable<number> = writable(0.0);
+export const unblock_pressure_flag: Writable<boolean> = writable(false);
 
 export let data = writable({});
 
@@ -116,7 +117,7 @@ export function connect2Demon() {
         console.log('Connected to daemon');
     }
     daemon_ws.onmessage = (event) => {
-        daemonStatusJson.set(JSON.parse(JSON.parse(event.data)));
+        daemonStatusJson.set(JSON.parse(event.data));
     }
     daemon_ws.onclose = () => {
         console.log('Disconnected from daemon');
@@ -151,16 +152,22 @@ export function connectApi() {
             isPaused.set(temp.is_paused);
         }
         if (temp.hasOwnProperty("error")) {
-            error.set(temp.error);
+            error(JSON.stringify(temp.error), 5000);
         }
         if (temp.hasOwnProperty("warning")) {
-            warning.set(temp.warning);
+            warning(JSON.stringify(temp.warning), 5000);
         }
         if (temp.hasOwnProperty("torques")) {
             torques.set(temp.torques);
         }
         if (temp.hasOwnProperty("autonomous_control")) {
             autonomous_control.set(temp.autonomous_control);
+        }
+        if (temp.hasOwnProperty("threshold")) {
+            threshold.set(temp.threshold);
+        }
+        if (temp.hasOwnProperty("unblock_pressure_flag")) {
+            unblock_pressure_flag.set(temp.unblock_pressure_flag);
         }
         data.set(temp);
     };

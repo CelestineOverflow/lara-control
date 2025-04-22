@@ -2,33 +2,28 @@
 	import LaraState from '$lib/LaraState.svelte';
 	import { connect2Demon, connectApi } from '$lib/robotics/coordinate.svelte';
 	import { setupSocket } from '$lib/robotics/laraapi';
-	import { error, warning } from '$lib/robotics/coordinate.svelte';
+
 	import '../app.css';
 	let { children } = $props();
 	import { onMount } from 'svelte';
 	import System from '$lib/System.svelte';
+	import TestNotifications from '$lib/testNotifications.svelte';
+	import NotificationList from '$lib/NotificationList.svelte';
 	// import Notification from '$lib/Notification.svelte';
 
 	onMount(async () => {
 		await setupSocket();
 		connectApi();
 		connect2Demon();
+		setTimeout(() => {
+			window.location.reload();
+		}, 1000 * 60 * 30); // 5 minutes
 	});
 
-	// let notification_type = $state("success");
-	// let notification_message = $state("test");
-	// let show_notification = $state(false);
 
-	// function showNotification(type: string, message: string) {
-	// 	notification_type = type;
-	// 	notification_message = message;
-	// 	show_notification = true;
-	// 	setTimeout(() => {
-	// 		show_notification = false;
-	// 		notification_message = "";
-	// 	}, 1000);
-	// }
+
 </script>
+<NotificationList />
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore a11y_missing_attribute -->

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { daemonStatusJson } from './robotics/coordinate.svelte';
+	import { reboot, restartDeployer } from './robotics/laraapi';
 
 	async function kill_proccess(script_name: string) {
 		const url = `http://192.168.2.209:8765/kill_process?script_name=${script_name}`;
@@ -68,6 +69,7 @@
 	<div class="dropdown dropdown-bottom">
 		<div tabindex="0" role="button" class="btn m-1">System Status {status}</div>
 		<div class="dropdown-content menu bg-base-100 rounded-box z-1 w-202 p-1 shadow-sm">
+			
 			<table class="table">
 				<thead>
 					<tr>
@@ -86,13 +88,13 @@
 								<td>{value.running ? '✅' : '❌'}</td>
 								<td>{value.debug ? '✅' : '❌'}</td>
 								<td>
-									<button class="btn btn-sm btn-error" on:click={() => kill_proccess(key)}
+									<button class="btn btn-sm btn-error" onclick={() => kill_proccess(key)}
 										>Kill</button
 									>
-									<button class="btn btn-sm btn-warning" on:click={() => restart_process(key)}
+									<button class="btn btn-sm btn-warning" onclick={() => restart_process(key)}
 										>Restart</button
 									>
-									<button class="btn btn-sm btn-info" on:click={() => show_process(key)}
+									<button class="btn btn-sm btn-info" onclick={() => show_process(key)}
 										>Show</button
 									>
 								</td>
@@ -101,6 +103,15 @@
 					{/if}
 				</tbody>
 			</table>
+			<div class="flex justify-center">
+				
+			<div class="tooltip tooltip-bottom" data-tip="Redeploy proprietary Neura Robotics control code on the robot arm PC. This process may take a while. You will need to press the white button on the control box afterwards.">
+				<button class="btn btn-warning" onclick={() => restartDeployer()}>Restart Robot Arm Code</button>
+				</div>
+			<div class="tooltip tooltip-bottom" data-tip="This will restart the robot arm pc. This process may take a while. You will need to press the white button on the control box afterwards.">
+				<button class="btn btn-error" onclick={() => reboot()}>Restart Robot Arm Pc</button>
+				</div>
+			</div>
 		</div>
 	</div>
 </div>
