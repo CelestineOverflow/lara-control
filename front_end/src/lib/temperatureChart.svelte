@@ -58,7 +58,6 @@
   async function setTemperature() {
 		const val = Number(inputTemperature);
 		if (!isNaN(val)) {
-			console.log('Setting pressure:', val);
       // Prevent multiple requests
       if (isCurrentlyHeating) {
         console.error('Already heating');

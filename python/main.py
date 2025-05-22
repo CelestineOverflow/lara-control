@@ -23,9 +23,7 @@ import json
 # --- Global variables ---
 
 serial_handler = None
-json_data =	None
 reader_thread =	None
-json_data_consumed = False
 ip = "192.168.2.209"
 first_data_json	= None
 stop_event = threading.Event()
@@ -51,69 +49,16 @@ def emit_warning(warning_code: int, warning_message: str):
 def	current_milli_time():
 	return round(time.time() * 1000)
 
-def	reader():
-	global serial_handler, json_data, json_data_consumed, first_data_json, threshold, force, lara, unblock_pressure_flag
-	serial_handler.write('{"connected":	1}')
-	flag_error_sent = False
-	flag_warning_sent = False
-	unblock_start_time = None
-	while not stop_event.is_set():
-		if serial_handler.has_new_data():
-			json_data = serial_handler.read()
-			if not first_data_json:
-				first_data_json	= json_data
-			json_data_consumed = False
-		
-			if lara is not None:
-				if "force" in json_data:
-					force =	float(json_data["force"])
-					if force > threshold and lara is not None and not flag_error_sent:
-						lara.robot.power('off')
-						emit_error(1, f"Force exceeded {threshold}, robot powered off")
-						flag_error_sent = True
-					if force > threshold - (threshold * 0.1) and lara is not None and not flag_warning_sent:
-						lara.robot.pause()
-						emit_warning(1, f"Force near threshold {threshold}")
-						flag_warning_sent = True
-					else:
-						flag_error_sent = False
-						flag_warning_sent = False
-					
-					if unblock_pressure_flag:
-						# print(f"Unblock pressure flag is set, force: {force}, force type: {type(force)}, threshold: {threshold}, threshold type: {type(threshold)} eval = {force <(threshold_default/2)}")
-						##Unblock pressure flag is set, force: -294.4945
-						if force <(threshold_default/2):
-							if unblock_start_time is None:
-								unblock_start_time = current_milli_time()
-								# print(f"Unblock start time: {unblock_start_time}")
-							else:
-								if current_milli_time() - unblock_start_time > 3000:
-									unblock_pressure_flag = False
-									threshold = threshold_default
-									unblock_start_time = None
-
 @asynccontextmanager
 async def lifespan(app:	FastAPI):
-	global serial_handler, reader_thread, stop_event, lara, ip
-	serial_handler = Plunger("COM13", 115200)
-	serial_handler.start()
-	#connect to the	robot
+	print("Starting up...")
+	global lara
 	lara = Lara()
 	await lara.connect_socket()
 	print("Connected to the	robot")
 	lara.robot.turn_off_jog()
-	# #	Start the reader thread
-	stop_event.clear()
-	reader_thread =	threading.Thread(target=reader,	daemon=True)
-	reader_thread.start()
-	try:
-		yield
-	finally:
-		# Stop the reader thread and clean up
-		stop_event.set()
-		if reader_thread:
-			reader_thread.join()
-		serial_handler.stop()
+	yield
+	print("Shutting down...")
 
 app	= FastAPI(lifespan=lifespan)
 app.add_middleware(
@@ -160,15 +105,11 @@ manager = ConnectionManager()
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-	global lara, json_data, threshold, is_paused, force, json_data_consumed, first_data_json, autonomous_control_flag, unblock_pressure_flag
+	global lara, threshold, is_paused
 	await manager.connect(websocket)
-	last_time = time.time()
 
 	try:
 		while True:
-			if not json_data_consumed and json_data is not None:
-				await manager.broadcast(json_data)
-				json_data_consumed = True
 			if not error_queue.empty():
 					error = error_queue.get()
 					await manager.broadcast({
@@ -185,14 +126,7 @@ async def websocket_endpoint(websocket: WebSocket):
 						"warning_message": warning[1]
 					}
 				})
-			
-			if time.time() - last_time > 0.5: # Send status every 0.5 seconds
-				await manager.broadcast({
-					"threshold": threshold,
-					"unblock_pressure_flag": unblock_pressure_flag,
-				})
-				last_time = time.time()
-			await asyncio.sleep(0.001)
+			await asyncio.sleep(0.1)  # Adjust the sleep time as needed
 	except WebSocketDisconnect:
 		manager.disconnect(websocket)
 
@@ -243,17 +177,8 @@ def	set_sim_or_emulation(mode: str):
 	lara.robot.set_sim_real(mode)
 	return {"context": lara.robot.get_sim_or_real()}
 
-@app.get("/current_pump_pressure")
-def	get_current_pump_pressure():
-	global json_data
-	if json_data is not None:
-		if "pump_sensor" in json_data:
-			return {"pressure": json_data["pump_sensor"]}
-	return {"pressure": 0}
-
 tray = None
 socket_pose	= None
-#try to load tray and socket pose from config.json
 
 try:
 	with open("config.json", "r") as f:
@@ -354,7 +279,7 @@ except json.JSONDecodeError:
 pose_correct = False
 @app.post("/moveToCell")
 async def move_to_cell(row: int = 0, col: int = 0):
-	global lara, socket_pose, json_data
+	global lara, socket_pose
 	error = await asyncio.to_thread(lara.move_to_pose, tray.get_cell_robot_orientation(row, col))
 	if error:
 		return {"error": error}
@@ -471,7 +396,7 @@ async def to_socket():
 
 @app.post("/retract")
 async def retract(distance = -0.15):
-	global lara, socket_pose, json_data, threshold, threshold_default, unblock_pressure_flag
+	global lara, socket_pose, threshold, threshold_default, unblock_pressure_flag
 	#if the value is not negative then throw an error
 	distance = float(distance)
 	if distance >= 0.0:
@@ -484,7 +409,7 @@ async def retract(distance = -0.15):
 
 @app.post("/moveToCellRetract")
 async def move_to_cell_retract(row: int = 0, col: int = 0):
-	global lara, socket_pose, json_data
+	global lara, socket_pose
 	# lara.move_to_pose_from_retract(tray.get_cell_robot_orientation(row, col))
 	await asyncio.to_thread(lara.move_to_pose_from_retract, tray.get_cell_robot_orientation(row, col))
 	return {"success": "Moved to cell and retracted"}
@@ -496,7 +421,7 @@ def	get_offset():
 
 @app.post("/moveToSocketRetract")
 async def move_to_socket_retract():
-	global lara, socket_pose, json_data
+	global lara, socket_pose
 	try:
 		await asyncio.to_thread(lara.move_to_pose_tag_from_retract, socket_pose)
 		await lara.set_translation_speed_mms(4)
@@ -552,7 +477,7 @@ tag_pose : Pose = None
 
 @app.post("/moveToSocket")
 async def move_to_socket():
-	global lara, socket_pose, json_data, firstTimeSocketMove, tag_pose
+	global lara, socket_pose, firstTimeSocketMove, tag_pose
 	try:
 		await asyncio.to_thread(lara.move_to_pose_tag, socket_pose)
 		await lara.set_translation_speed_mms(4)
@@ -615,7 +540,7 @@ def distance_to_cell(row: int = 0, col: int = 0):
 
 @app.post("/moveToSocketSmart")
 async def move_to_socket_smart():
-	global lara, socket_pose, json_data, firstTimeSocketMove, tag_pose
+	global lara, socket_pose, firstTimeSocketMove, tag_pose
 	if socket_pose is None:
 		return {"error": "Socket pose not set"}
 	current_pose = lara.current_pose_raw()
@@ -633,7 +558,7 @@ async def move_to_socket_smart():
 
 @app.post("/moveToCellSmart")
 async def move_to_cell_smart(row: int = 0, col: int = 0):
-	global lara, socket_pose, json_data
+	global lara, socket_pose
 	cell_pose = tray.get_cell_robot_orientation(row, col)
 	if cell_pose is None:
 		return {"error": "Cell pose not set"}
@@ -650,108 +575,6 @@ async def move_to_cell_smart(row: int = 0, col: int = 0):
 	if error:
 		return {"error": error}
 	return {"success": "Moved to cell"}
-
-@app.post("/moveUntilPressure")
-async def move_until_pressure(pressure: float = 1000.0, wiggle_room: float = 300.0):
-	global lara, json_data, threshold, force, threshold_press, unblock_pressure_flag
-	error = None
-	current_force = 0
-	unblock_pressure_flag = False
-	threshold = threshold_press
-	# Store starting position
-	start_position = lara.current_pose_raw().position
-	await lara.set_translation_speed_mms(1)
-	MAX_DEPTH = 0.020  # 10mm or 0.01m
-	
-	# First stage: Move down continuously until near target pressure
-	print(f"Starting move, start height: {lara.pose.position.z * 1000} mm")
-	
-	counter = 0
-	while True:
-		
-		# Check maximum depth for safety
-		if  lara.current_pose_raw().position.z - start_position.z < -MAX_DEPTH:
-			print("Maximum depth reached")
-			error = "Maximum depth reached"
-			break
-			
-		# Check if we have force data
-		if json_data is not None and "force" in json_data:
-			current_force = float(json_data["force"])
-			print(f"Current force: {current_force}")
-			
-			# Stop when we get close to target pressure
-			if current_force > (pressure - wiggle_room):
-				print(f"Initial pressure target reached: {current_force}")
-				break
-				
-			# Continue jogging down
-			lara.start_moving(0, 0, -1, 0, 0, 0)
-			await asyncio.sleep(0.01)
-			counter += 1
-			if counter > 10000:
-				error = "Counter exceeded"
-				break
-	lara.stopMoving()
-	if error:
-		return {"error": error}
-	# Second stage if pressure is higher than 3000
-	if current_force > 3000:
-		res =  await fine_adjust_pressure(pressure, wiggle_room)
-		unblock_pressure_flag = True
-		return res
-	else:
-		unblock_pressure_flag = True
-		return {"success": "Pressure reached target"}
-
-async def fine_adjust_pressure(pressure: float = 1000.0, wiggle_room: float = 50.0):
-	global lara, json_data
-	error = None
-	try:
-		print(f"Starting fine pressure adjustment to target {pressure}±{wiggle_room}")
-		await lara.set_translation_speed_mms(0.5)
-		
-		# Track consecutive readings within threshold to ensure stability
-		stable_count = 0
-		required_stable_readings = 10  # Number of consecutive readings needed to confirm stability
-		current_force = 0
-		
-		for i in range(200):  # Maximum iterations
-			if json_data is not None and "force" in json_data:
-				current_force = float(json_data["force"])
-				print(f"Current force: {current_force}, target: {pressure}±{wiggle_room}")
-				
-				if current_force < pressure - wiggle_room:
-					# Too little pressure, move down
-					print("Pressure too low - moving down")
-					lara.start_moving(0, 0, -0.1, 0, 0, 0)
-					lara.stopMoving()
-					stable_count = 0
-				elif current_force > pressure + wiggle_room:
-					# Too much pressure, move up
-					print("Pressure too high - moving up")
-					lara.start_moving(0, 0, 0.1, 0, 0, 0)
-					lara.stopMoving()
-					stable_count = 0
-				else:
-					# Within threshold, increase stable count
-					print(f"Within threshold, stable count: {stable_count}/{required_stable_readings}")
-					lara.stopMoving()
-					stable_count += 1
-					if stable_count >= required_stable_readings:
-						print("Pressure stabilized within threshold")
-						break
-				await asyncio.sleep(0.02)
-			if i == 1000:
-				error = "Failed to stabilize pressure within maximum iterations"
-	except Exception as e:
-		error = str(e)
-		print(f"Error during pressure adjustment: {error}")
-	finally:
-		lara.stopMoving()
-		if error:
-			return {"error": error}
-		return {"success": f"Force stabilized at {current_force} (target: {pressure}±{wiggle_room})"}
 
 @app.post("/EmergencyStop")
 def emergency_stop():
@@ -787,36 +610,6 @@ def api_download():
 		return FileResponse(API_FILE, media_type='application/octet-stream', filename=API_FILE)
 	else:
 		return {"error": "API module not found"}
-
-@app.post("/setHeater")
-def	setHeater(newHeat :	int):
-	global serial_handler
-	serial_handler.write(f'{{"setTemp":	{newHeat}}}')
-	return {"setTemp": newHeat}
-
-
-@app.post("/wait_for_temperature")
-async def wait_for_temperature(newHeat : int):
-	if newHeat < 60 or newHeat > 250:
-		return {"error": "Temperature must be between 60 and 250"}
-	global serial_handler
-	serial_handler.write(f'{{"setTemp":	{newHeat}}}')
-	start_time = time.time()
-	while True:
-		if json_data is not None and "temperature" in json_data:
-			print(f"Current temperature: {json_data['temperature']}")
-			temperature_dict = json_data["temperature"]
-			current_temperature = temperature_dict["current"]
-			#check if temperature is within 1 degree of target
-			if abs(current_temperature - newHeat) < 1:
-				print("Temperature reached")
-				return {"success": "Temperature reached"}
-
-		if time.time() - start_time > 60*5:  # 5 minutes timeout
-			print("Timeout waiting for temperature")
-			serial_handler.write(f'{{"setTemp":	{0}}}')
-			return {"error": "Timeout waiting for temperature"}
-		await asyncio.sleep(1)
 
 @app.post("/zero_rotation")
 async def zero_rotation():

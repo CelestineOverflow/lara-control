@@ -2,7 +2,7 @@
 import socketIOClient from 'socket.io-client';
 import { get, writable } from 'svelte/store';
 import { toRad } from './utils';
-import { isPaused, Pose, robotJoints, TargetPose, trayPoses } from '$lib/robotics/coordinate.svelte';
+import { autonomous_control, isPaused, loadcell_value, Pose, robotJoints, TargetPose, temperature, threshold, torques, trayPoses, unblock_pressure_flag } from '$lib/robotics/coordinate.svelte';
 import { Vector3, Quaternion } from 'three';
 import { error, warning } from '$lib/NotificationsLib';
 //very important  npm install socket.io-client@2 --save
@@ -13,9 +13,78 @@ export const lara_robot_power_status = writable(false);
 export const lara_collision_status = writable(false);
 export const lara_simulated_status = writable(false); // Simulated or real robot
 let socket: any;
+let apiSocket: any;
 
 
 
+// ws.onmessage = (event) => {
+//         const temp = JSON.parse(event.data);
+//         if (temp.hasOwnProperty("force")) {
+//             loadcell_value.set(parseFloat(temp.force));
+//         }
+//         if (temp.hasOwnProperty("temperature")) {
+//             temperature.set(temp.temperature);
+//         }
+//         if (temp.hasOwnProperty("is_paused")) {
+//             isPaused.set(temp.is_paused);
+//         }
+//         if (temp.hasOwnProperty("error")) {
+//             error(JSON.stringify(temp.error), 5000);
+//         }
+//         if (temp.hasOwnProperty("warning")) {
+//             warning(JSON.stringify(temp.warning), 5000);
+//         }
+//         if (temp.hasOwnProperty("torques")) {
+//             torques.set(temp.torques);
+//         }
+//         if (temp.hasOwnProperty("autonomous_control")) {
+//             autonomous_control.set(temp.autonomous_control);
+//         }
+//         if (temp.hasOwnProperty("threshold")) {
+//             threshold.set(temp.threshold);
+//         }
+//         if (temp.hasOwnProperty("unblock_pressure_flag")) {
+//             unblock_pressure_flag.set(temp.unblock_pressure_flag);
+//         }
+//         data.set(temp);
+
+export function apiSocketSetup() {
+    let apiSocket = socketIOClient('192.168.2.209:8081');
+
+    apiSocket.on('connect', async () => {
+        console.log(`Connected with socket ID: ${socket.id}`);
+    });
+
+    apiSocket.on('serialData', (data : any) => {
+        if (data.hasOwnProperty("force")) {
+            loadcell_value.set(parseFloat(data.force));
+        }
+        if (data.hasOwnProperty("temperature")) {
+            temperature.set(data.temperature);
+        }
+        if (data.hasOwnProperty("is_paused")) {
+            isPaused.set(data.is_paused);
+        }
+        if (data.hasOwnProperty("error")) {
+            error(JSON.stringify(data.error), 5000);
+        }
+        if (data.hasOwnProperty("warning")) {
+            warning(JSON.stringify(data.warning), 5000);
+        }
+        if (data.hasOwnProperty("torques")) {
+            torques.set(data.torques);
+        }
+        if (data.hasOwnProperty("autonomous_control")) {
+            autonomous_control.set(data.autonomous_control);
+        }
+        if (data.hasOwnProperty("threshold")) {
+            threshold.set(data.threshold);
+        }
+        if (data.hasOwnProperty("unblock_pressure_flag")) {
+            unblock_pressure_flag.set(data.unblock_pressure_flag);
+        }
+    });
+}
 
 export function setupSocket() {
     socket = socketIOClient("http://192.168.2.13:8081");
@@ -411,7 +480,7 @@ export async function press(force: number) {
         force = 10000;
     }
     
-    const response = await fetch(`http://192.168.2.209:1442/moveUntilPressure?pressure=${force}&wiggle_room=200`, {
+    const response = await fetch(`http://192.168.2.209:8082/moveUntilPressure?pressure=${force}&wiggle_room=200`, {
         method: "POST",
         headers: {
             "accept": "application/json",
@@ -423,7 +492,7 @@ export async function press(force: number) {
 
 export async function togglePump(bool: boolean) {
     try {
-        const response = await fetch(`http://192.168.2.209:1442/togglePump?boolean=${bool}`, {
+        const response = await fetch(`http://192.168.2.209:8082/togglePump?boolean=${bool}`, {
             method: "POST",
             headers: {
                 Accept: "application/json",
@@ -557,12 +626,7 @@ export async function setHSL(hue: number, sat: number, light: number) {
 export let heater = writable(0);
 
 export async function setHeater(newHeat: number) {
-    heater.set(newHeat);
-    if (!isConnected) {
-        console.error("Not connected to the robot.");
-        return;
-    }
-    fetch(`http://192.168.2.209:1442/setHeater?newHeat=${newHeat}`, {
+    fetch(`http://192.168.2.209:8082/setHeater?setTemp=${newHeat}`, {
         method: "POST",
         headers: {
             "accept": "application/json",

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import LaraState from '$lib/LaraState.svelte';
 	import { connect2Demon, connectApi } from '$lib/robotics/coordinate.svelte';
-	import { setupSocket } from '$lib/robotics/laraapi';
+	import { apiSocketSetup, setupSocket } from '$lib/robotics/laraapi';
 
 	import '../app.css';
 	let { children } = $props();
@@ -12,6 +12,8 @@
 	// import Notification from '$lib/Notification.svelte';
 
 	onMount(async () => {
+		
+		await apiSocketSetup();
 		await setupSocket();
 		connectApi();
 		connect2Demon();

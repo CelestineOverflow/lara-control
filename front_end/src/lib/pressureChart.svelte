@@ -6,7 +6,7 @@
 
 	let canvas: HTMLCanvasElement;
 	let dataIndex = 0;
-	const MAX_DATA_POINTS = 100;
+	const MAX_DATA_POINTS = 1000;
 
 	let current_pressure_in_grams = 0.0;
 	let target_pressure_in_grams = 0.0;
