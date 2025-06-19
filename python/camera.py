@@ -8,7 +8,7 @@ import socket
 import threading
 import queue
 from scipy.spatial.transform import	Rotation
-from pupil_apriltags import	Detector
+from pyapriltags import Detector
 # from mjpeg_streamer	import MjpegServer,	Stream
 import time
 from fastapi import	FastAPI, WebSocket
@@ -723,8 +723,6 @@ def	camera_loop():
 	"""
 	global stop_camera_thread
 
-	# Start	your MJPEG server and streaming
-
 	# Create the WebRTC streamer with high quality settings
 	streamer = WebRTCStreamer(
 		host="192.168.2.209", 
@@ -733,10 +731,10 @@ def	camera_loop():
 		default_width=1920,
 		default_height=1080,
 		default_fps=30,
-		default_bitrate=10000  # 10 Mbps for high quality
+		default_bitrate=60000  # 10 Mbps for high quality
 	)
 	# Add a stream
-	streamer.add_stream("default", 1920, 1080, 30, 5000)
+	streamer.add_stream("default", 1920, 1080, 30, 60000)
 	streamer.start()
 
 	# Some initialization

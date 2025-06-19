@@ -21,9 +21,6 @@ import logging
 import traceback
 import json
 # --- Global variables ---
-
-serial_handler = None
-reader_thread =	None
 ip = "192.168.2.209"
 first_data_json	= None
 stop_event = threading.Event()
@@ -285,11 +282,6 @@ async def move_to_cell(row: int = 0, col: int = 0):
 		return {"error": error}
 	return {"success": "Moved to cell"}
 
-@app.post("/tare")
-def	tare():
-	global serial_handler
-	serial_handler.write(f'{{"tare": 1}}')
-	return {"success": "Tare command sent"}
 
 
 @app.post("/to_tray")
@@ -682,51 +674,16 @@ async def zero_rotation():
 	await sio.disconnect()
 	return {"success": "Zeroed rotation"}
 	
-@app.post("/togglePump")
-def	toggle_pump(boolean	: bool):
-	global serial_handler
-	serial_handler.write(f'{{"pump": {100 if boolean else 0}}}')
-	return {"pump":	100	if boolean else	0}
 
 class LedStateModel(BaseModel):
 	leds: List[int]	 # or List[bool], depending	on your	usage
 
-@app.post("/setLeds")
-def	set_leds(led_data: LedStateModel):
-	"""
-	Just sets the LED states in one	shot.
-	Example	payload:
-	{
-	  "leds": [1, 0, 1, 1, 0, 1, 0]
-	}
-	"""
-	payload	= {"leds": led_data.leds}
-	serial_handler.write(json.dumps(payload))  # Chuck it to the microcontroller
-	return payload
 
 @app.get("/orientation_data")
 def	get_orientation_data():
 	global lara
 	orientation	= lara.pose.orientation.to_euler().to_dict(degrees=True)
 	return orientation
-
-@app.post("/setBrightness")
-def	set_brightness(newBrightness : int):
-	global serial_handler
-	serial_handler.write(f'{{"brightness": {newBrightness}}}')
-	return {"brightness": newBrightness}
-
-@app.post("/setHSL")
-def	set_hsl(hue	: float, sat : float, light	: float):
-	global serial_handler
-	serial_handler.write(f'{{"hue":	{hue}, "sat": {sat}, "light": {light}}}')
-	return {"hue": hue,	"sat": sat,	"light": light}
-
-@app.post("/setHeater")
-def	setHeater(newHeat :	int):
-	global serial_handler
-	serial_handler.write(f'{{"setTemp":	{newHeat}}}')
-	return {"setTemp": newHeat}
 
 @app.get("/getJointTorques")
 def	get_joint_torques():

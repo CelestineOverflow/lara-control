@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.ERROR)
 
 from websockets.sync.client import connect
 import json		
-link = "ws://192.168.2.209:8082"
+link = "ws://192.168.2.209:8083"
 		
 class AsyncWrapper:
 	def __init__(self, robot):

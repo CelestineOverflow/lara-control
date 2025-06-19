@@ -567,41 +567,6 @@
 		connectionStats = null;
 	}
 
-	// Apply quality changes by restarting the connection
-	function applyQualitySettings() {
-		if (connectionStatus === 'connected') {
-			console.log('Applying new quality settings:', currentQuality);
-
-			// Update custom quality preset if using custom
-			if (selectedQuality === 'custom') {
-				currentQuality.frameRate = customFrameRate;
-
-				// Update the qualityPresets.custom
-				qualityPresets.custom = {
-					width: videoWidth,
-					height: videoHeight,
-					frameRate: customFrameRate,
-					bitrate: customBitrate
-				};
-			}
-
-			stopConnection();
-			setTimeout(() => {
-				startConnection();
-			}, 500);
-		}
-	}
-
-	// Format data size into human-readable format
-	function formatBytes(bytes, decimals = 2) {
-		if (bytes === 0) return '0 Bytes';
-		const k = 1000;
-		const dm = decimals < 0 ? 0 : decimals;
-		const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-	}
-
 	// Initialize on component mount
 	onMount(() => {
 		if (autoStart) {

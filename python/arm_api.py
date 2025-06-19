@@ -4,7 +4,7 @@ import random
 import time
 from packaging import version
 from functools import wraps
-__version__ = "0.0.22"
+__version__ = "0.0.38"
 # URLs for fetching version and module
 version_url = "http://192.168.2.209:1442/api_version"
 module_url = "http://192.168.2.209:1442/api_module"
@@ -133,7 +133,7 @@ def move_to_cell_retract(row: int, col: int):
     print(response.text)
 
 def move_until_pressure(pressure: int, wiggle_room: int):
-    url = f'http://192.168.2.209:1442/moveUntilPressure?pressure={pressure}&wiggle_room={wiggle_room}'
+    url = f'http://192.168.2.209:8082/moveUntilPressure?pressure={pressure}&wiggle_room={wiggle_room}'
     response = requests.post(url)
     if response.status_code != 200 or "error" in response.text.lower():
         notify_user("Error", response.text)
@@ -141,7 +141,7 @@ def move_until_pressure(pressure: int, wiggle_room: int):
     print(response.text)
 
 def toggle_pump(state: bool):
-    url = f'http://192.168.2.209:1442/togglePump?boolean={state}'
+    url = f'http://192.168.2.209:8082/togglePump?boolean={state}'
     response = requests.post(url)
     if response.status_code != 200 or "error" in response.text.lower():
         notify_user("Error", response.text)
@@ -173,7 +173,7 @@ def move_to_socket_retract():
     print(response.text)
 
 def get_current_pump_pressure() -> int:
-    url = f'http://192.168.2.209:1442/current_pump_pressure'
+    url = f'http://192.168.2.209:8082/current_pump_pressure'
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()['pressure']
@@ -190,7 +190,7 @@ def retract(distance = -0.3):
     print(response.text)
 
 def set_brightness(brightness: int):
-    url = f'http://192.168.2.209:1442/setBrightness?newBrightness={brightness}'
+    url = f'http://192.168.2.209:8082/setBrightness?newBrightness={brightness}'
     response = requests.post(url)
     if response.status_code != 200 or "error" in response.text.lower():
         notify_user("Error", response.text)
@@ -198,7 +198,7 @@ def set_brightness(brightness: int):
     print(response.text)
 
 def set_heater(heat: int):
-    url = f'http://192.168.2.209:1442/setHeater?newHeat={heat}'
+    url = f'http://192.168.2.209:8082/setHeater?setTemp={heat}'
     response = requests.post(url)
     if response.status_code != 200 or "error" in response.text.lower():
         notify_user("Error", response.text)
@@ -206,7 +206,7 @@ def set_heater(heat: int):
     print(response.text)
 
 def wait_for_temperature(heat: int):
-    url = f'http://192.168.2.209:1442/wait_for_temperature?newHeat={heat}'
+    url = f'http://192.168.2.209:8082/wait_for_temperature?setTemp={heat}'
     response = requests.post(url)
     if response.status_code != 200 or "error" in response.text.lower():
         notify_user("Error", response.text)
@@ -214,9 +214,48 @@ def wait_for_temperature(heat: int):
     print(response.text)
 
 
-# wait_for_temperature
+def start_recording():
+    url = f'http://192.168.2.209:8082/startRecording'
+    response = requests.post(url)
+    if response.status_code != 200 or "error" in response.text.lower():
+        notify_user("Error", response.text)
+        raise Exception(response.text)
+    print(response.text)
+
+def stop_recording():
+    url = f'http://192.168.2.209:8082/stopRecording'
+    response = requests.post(url)
+    if response.status_code != 200 or "error" in response.text.lower():
+        notify_user("Error", response.text)
+        raise Exception(response.text)
+    print(response.text)
+
+def download_recording(output_dir: str):
+    url = f'http://192.168.2.209:8082/getRecording'
+    response = requests.get(url)
+    if response.status_code != 200 or "error" in response.text.lower():
+        notify_user("Error", response.text)
+        raise Exception(response.text)
+    with open(output_dir, 'wb') as f:
+        f.write(response.content)
+    print('Recording downloaded successfully.')
 
 
+def keepForce(force_in_grams: int, wiggle_room = 200):
+    url = f'http://192.168.2.209:8082/keepForce?pressure={force_in_grams}&wiggle_room={wiggle_room}'
+    response = requests.post(url)
+    if response.status_code != 200 or "error" in response.text.lower():
+        notify_user("Error", response.text)
+        raise Exception(response.text)
+    print(response.text)
+
+def stop_keepForce():
+    url = f'http://192.168.2.209:8082/stopKeepForce'
+    response = requests.post(url)
+    if response.status_code != 200 or "error" in response.text.lower():
+        notify_user("Error", response.text)
+        raise Exception(response.text)
+    print(response.text)
 
 class Cell:
     def __init__(self, x, y):
@@ -228,8 +267,8 @@ class Cell:
     @staticmethod
     def generate_cells(start_cell, end_cell) -> list:
         cells = []
-        for i in range(start_cell[0], end_cell[0]):
-            for j in range(start_cell[1], end_cell[1]):
+        for j in range(start_cell[0], end_cell[0]):
+            for i in range(start_cell[1], end_cell[1]):
                 cells.append(Cell(i, j))
         return cells
 
@@ -238,7 +277,7 @@ execution_counter = 0
 
 def labhandler_sequence(func):
     @wraps(func)
-    def wrapper(cell, *args, **kwargs):
+    def wrapper(cell, force=5000, *args, **kwargs):
         global execution_counter
         try:
             set_heater(0)
@@ -254,7 +293,7 @@ def labhandler_sequence(func):
                 retract(-0.3)
                 pump_pressure = get_current_pump_pressure()
                 print(f'Pump pressure: {pump_pressure}')
-                if pump_pressure < 150:
+                if pump_pressure < 145:
                     break
                 if j == 2:
                     print('Failed to reach pressure, cancelling test')
@@ -267,7 +306,7 @@ def labhandler_sequence(func):
             move_to_socket_retract()
             toggle_pump(False)
             time.sleep(5)
-            move_until_pressure(5000, 100)
+            move_until_pressure(force, 100)
             time.sleep(5)
             # ------------------- User Test -------------------
             try:
@@ -280,6 +319,7 @@ def labhandler_sequence(func):
                 cell.tested = True
                 cell.passed = False
             # ------------------- User Test -------------------
+            stop_keepForce()
             time.sleep(3)
             for j in range(3):
                 toggle_pump(True)
@@ -294,15 +334,23 @@ def labhandler_sequence(func):
                 move_until_pressure(1000, 300)
             to_tray()
             move_to_cell_retract(cell.x, cell.y)
-            MAX_RETRIES = 20
+            MAX_RETRIES = 10
+            finish = False
             for j in range(MAX_RETRIES):
+                if finish:
+                    break
                 toggle_pump(False)
-                time.sleep((j+1)*1) # from 1 to 20 seconds
+                time.sleep(10)
                 toggle_pump(True)
                 time.sleep(2)
-                pump_pressure = get_current_pump_pressure()
-                print(f'Pump pressure: {pump_pressure}')
-                if pump_pressure > 150:
+                for x in range(5):
+                    pump_pressure = get_current_pump_pressure()
+                    print(f'Pump pressure: {pump_pressure}')
+                    time.sleep(1)
+                    if pump_pressure > 140:
+                        finish = True
+                        break
+                if finish:
                     break
                 if j == MAX_RETRIES - 1:
                     notify_user("Error", f'sample stuck in plunger')

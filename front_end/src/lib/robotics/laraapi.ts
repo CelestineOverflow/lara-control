@@ -2,7 +2,7 @@
 import socketIOClient from 'socket.io-client';
 import { get, writable } from 'svelte/store';
 import { toRad } from './utils';
-import { autonomous_control, isPaused, loadcell_value, Pose, robotJoints, TargetPose, temperature, threshold, torques, trayPoses, unblock_pressure_flag } from '$lib/robotics/coordinate.svelte';
+import { autonomous_control, isPaused, loadcell_target, loadcell_value, Pose, robotJoints, TargetPose, temperature, threshold, torques, trayPoses, unblock_pressure_flag } from '$lib/robotics/coordinate.svelte';
 import { Vector3, Quaternion } from 'three';
 import { error, warning } from '$lib/NotificationsLib';
 //very important  npm install socket.io-client@2 --save
@@ -55,6 +55,17 @@ export function apiSocketSetup() {
         console.log(`Connected with socket ID: ${socket.id}`);
     });
 
+
+    // io.emit('forceUpdate', { force });
+    apiSocket.on('forceUpdate', (data: any) => {
+        console.log("forceUpdate", data);
+        //{
+        //     "force": 1000
+        // }
+        if (data.hasOwnProperty("force")) {
+            loadcell_target.set(parseFloat(data.force));
+        }
+    });
     apiSocket.on('serialData', (data : any) => {
         if (data.hasOwnProperty("force")) {
             loadcell_value.set(parseFloat(data.force));
@@ -481,6 +492,33 @@ export async function press(force: number) {
     }
     
     const response = await fetch(`http://192.168.2.209:8082/moveUntilPressure?pressure=${force}&wiggle_room=200`, {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+        },
+    });
+    const data = await response.json();
+    return data;
+}
+
+export async function keepForce(force: number) {
+    //force between 0 and 10000
+    if (force > 10000) {
+        console.error("Force too high, setting to max force.");
+        force = 10000;
+    }
+    
+    const response = await fetch(`http://192.168.2.209:8082/keepForce?pressure=${force}&wiggle_room=200`, {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+        },
+    });
+    const data = await response.json();
+    return data;
+}
+export async function stopKeepForce() {
+    const response = await fetch(`http://192.168.2.209:8082/stopKeepForce`, {
         method: "POST",
         headers: {
             "accept": "application/json",

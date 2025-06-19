@@ -126,7 +126,7 @@ class WebRTCStreamer:
                  default_width: int = 1280,
                  default_height: int = 720,
                  default_fps: int = 30,
-                 default_bitrate: int = 5000,
+                 default_bitrate: int = 10000,
                  max_bitrate: int = 50000):
         """Initialize the WebRTC streamer
         

@@ -1,12 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { loadcell_value, threshold, unblock_pressure_flag } from '$lib/robotics/coordinate.svelte';
+	import {
+		loadcell_value,
+		loadcell_target,
+		unblock_pressure_flag
+	} from '$lib/robotics/coordinate.svelte';
 	import ChartWorker from './ChartWorker.ts?worker';
-	import { press } from '$lib/robotics/laraapi';
+	import { keepForce, press, stopKeepForce } from '$lib/robotics/laraapi';
 
 	let canvas: HTMLCanvasElement;
 	let dataIndex = 0;
 	const MAX_DATA_POINTS = 1000;
+	const downsample = 10;
+	let index = 0;
 
 	let current_pressure_in_grams = 0.0;
 	let target_pressure_in_grams = 0.0;
@@ -21,8 +27,16 @@
 			},
 			[offscreen]
 		);
+
 		const unsubscribe = loadcell_value.subscribe((value) => {
-			const tempTarget = value;
+			index++;
+			if (index > downsample) {
+				index = 0;
+				return; // Skip this update to downsample
+
+			}
+			
+			const tempTarget = $loadcell_target;
 			const tempCurrent = value;
 			if (isNaN(tempTarget) || isNaN(tempCurrent)) {
 				return;
@@ -51,80 +65,40 @@
 
 	let inputPressure: string = '';
 
-  let isCurrentlyPressing = false;
+	let isCurrentlyPressing = false;
 
 	async function setPressure() {
 		const val = Number(inputPressure);
 		if (!isNaN(val)) {
-      if (isCurrentlyPressing) {
-        console.error('Already pressing');
-        return;
-      }
-      isCurrentlyPressing = true;
+			if (isCurrentlyPressing) {
+				console.error('Already pressing');
+				return;
+			}
+			isCurrentlyPressing = true;
 			let result = await press(val);
-      isCurrentlyPressing = false;
+			isCurrentlyPressing = false;
+		} else {
+			console.error('Invalid pressure value');
+		}
+	}
+	async function setKeepForce() {
+		const val = Number(inputPressure);
+		if (!isNaN(val)) {
+			let result = await keepForce(val);
 		} else {
 			console.error('Invalid pressure value');
 		}
 	}
 </script>
-<!-- 
-<div class="stats bg-base-100 border border-base-300">
-	<div class="stat">
-	  <div class="stat-title">Force</div>
-	  <div class="stat-value">{current_pressure_in_grams.toFixed(0)} g </div>
-	  <div class="stat-actions">
-		<button class="btn btn-xs btn-success">Add funds</button>
-	  </div>
-	</div>
-  
-	<div class="stat">
-	  <div class="stat-title">Preset</div>
-	  <div class="stat-value"> {target_pressure_in_grams.toFixed(0)} g</div>
-	  <div class="stat-actions">
-		<button class="btn btn-xs">Withdrawal</button>
-		<button class="btn btn-xs">Deposit</button>
-	  </div>
-	</div>
-  </div> -->
 
-<div class="round flex h-full flex-col bg-gray-800 p-4 text-white">
-	<h2 class="text-right text-2xl font-bold text-white">Force</h2>
-	<h2 class="text-right text-xl font-bold text-gray-400">
-		Current: {current_pressure_in_grams.toFixed(0)} g | Preset: {target_pressure_in_grams.toFixed(
-			0
-		)} g
-	</h2>
+<div class="round bg-transparent p-4 text-white">
+	<div class="grid grid-cols-2">
+		<h2 class="text-xl text-right font-bold text-white" style="-webkit-text-stroke: 1px black;">
+			Force Current: {current_pressure_in_grams.toFixed(0)} g | Target: {target_pressure_in_grams.toFixed(
+				0
+			)} g
+		</h2>
+	</div>
 
-	
 	<canvas bind:this={canvas}></canvas>
-
-	<div class="grid grid-cols-4 gap-1">
-		<input
-			type="text"
-			class="col-span-3 text-black text-sm p-2"
-			required
-			placeholder="Type a number between 1000.0 to 10000.0"
-			bind:value={inputPressure}
-			title="Must be between be 1 to 10"
-      on:keyup={(e) => {
-        if (e.key === 'Enter') {
-          setPressure();
-        }
-      }}
-		/>
-    {#if isCurrentlyPressing}
-      <span class="loading loading-spinner text-primary"></span>
-    {:else}
-    <button on:click={setPressure} class="btn btn-outline btn-success">Set</button>
-    {/if}
-	<li>
-		<span class="text-sm">Max Force: {$threshold}</span>
-	</li>
-	<!-- <li>
-		<span class="text-sm">Unblocked: {$unblock_pressure_flag}</span>
-	</li> -->
-	
-	</div>
-	
 </div>

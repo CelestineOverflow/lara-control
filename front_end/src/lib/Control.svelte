@@ -1,7 +1,7 @@
 <script lang="ts">
 	import CartesianPad from '$lib/CartesianPad.svelte';
 	import { autonomous_control } from './robotics/coordinate.svelte';
-	import { goToSocket, setSocket, setTray, togglePump } from './robotics/laraapi';
+	import { goToSocket, keepForce, press, setHeater, setSocket, setTray, stopKeepForce, togglePump } from './robotics/laraapi';
 	import Tray from './Tray.svelte';
 
 	// State variables
@@ -19,6 +19,7 @@
 		temperature: false,
 		lightControl: false,
 		armControl: false,
+		actuatorControl: false,
 		cameraControl: false,
     plunger: false,
 	};
@@ -36,13 +37,57 @@
     isProgressSocket = false;
     
   }
+	let isCurrentlyHeating = false;
+	let inputTemperature = '';
+
+  	async function setTemperature() {
+		const val = Number(inputTemperature);
+		if (!isNaN(val)) {
+			// Prevent multiple requests
+			if (isCurrentlyHeating) {
+				console.error('Already heating');
+				return;
+			}
+			isCurrentlyHeating = true;
+			let result = await setHeater(val);
+			isCurrentlyHeating = false;
+		} else {
+			console.error('Invalid pressure value');
+		}
+	}
+	let inputPressure = '';
+	let threshold = 10000; // Default threshold value
+	let isCurrentlyPressing = false;
+
+	async function setPressure() {
+		const val = Number(inputPressure);
+		if (!isNaN(val)) {
+      if (isCurrentlyPressing) {
+        console.error('Already pressing');
+        return;
+      }
+      isCurrentlyPressing = true;
+			let result = await press(val);
+      isCurrentlyPressing = false;
+		} else {
+			console.error('Invalid pressure value');
+		}
+	}
+	async function setKeepForce() {
+		const val = Number(inputPressure);
+		if (!isNaN(val)) {
+			let result = await keepForce(val);
+		} else {
+			console.error('Invalid pressure value');
+		}
+	}
 
 
 </script>
 
 <div class="h-full w-full">
 	{#if $autonomous_control}{:else}{/if}
-	<div class="join join-vertical bg-base-100 w-full">
+	<div class="join join-vertical bg-base-100 w-full rounded-2xl">
 		<!-- Go to Waypoint Section -->
 		<div class="collapse-arrow join-item border-base-300 collapse border">
 			<input
@@ -99,10 +144,10 @@
     <div class="collapse-arrow join-item border-base-300 collapse border">
 			<input
 				type="checkbox"
-				checked={openSections.armControl}
+				checked={openSections.actuatorControl}
 				on:change={() => toggleSection('Plunger')}
 			/>
-			<div class="collapse-title font-semibold">Plunger </div>
+			<div class="collapse-title font-semibold">Actuator </div>
 			<div class="collapse-content">
 				<button
 					on:click={() => togglePump(on_off).then(() => (on_off = !on_off))}
@@ -110,6 +155,49 @@
 				>
 					{on_off ? 'Turn On Pump' : 'Turn Off Pump'}
 				</button>
+					<div class="grid grid-cols-4 gap-1">
+		<input
+			type="text"
+			class="col-span-3 p-2 text-sm text-black"
+			required
+			placeholder="Type a number between 0° to 250°"
+			bind:value={inputTemperature}
+			title="Must be between be 1 to 10"
+			on:keyup={(e) => {
+				if (e.key === 'Enter') {
+					setTemperature();
+				}
+			}}
+		/>
+		{#if isCurrentlyHeating}
+			<span class="loading loading-spinner text-primary"></span>
+		{:else}
+			<button on:click={setTemperature} class="btn btn-outline btn-success">Set</button>
+		{/if}
+	</div>
+	<div class="grid grid-cols-4 gap-1">
+		<input
+			type="text"
+			class="col-span-3 text-black text-sm p-2"
+			required
+			placeholder="Type a number between 1000.0 to 10000.0"
+			bind:value={inputPressure}
+			title="Must be between be 1 to 10"
+			on:keyup={(e) => {
+				if (e.key === 'Enter') {
+					setPressure();
+				}
+			}}
+		/>
+		{#if isCurrentlyPressing}
+			<span class="loading loading-spinner text-primary"></span>
+		{:else}
+			<button on:click={setPressure} class="btn btn-outline btn-success">Set</button>
+		{/if}
+		<button on:click={setKeepForce} class="btn btn-outline btn-warning">Keep</button>
+		<button on:click={stopKeepForce} class="btn btn-outline btn-error">Stop Keep</button>
+
+	</div>
 			</div>
 		</div>
 	</div>

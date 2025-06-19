@@ -7,8 +7,8 @@
 
 #define RREF         402.0
 #define RNOMINAL     100.0
-#define pump_pwm     9
-#define fan_pwm      5
+#define pump_pwm     5
+#define fan_pwm      9
 #define heater_pwm   12
 #define SK6812_PIN   7
 
