@@ -3,10 +3,7 @@
 	import * as THREE from 'three';
 	import { robotScene } from '$lib/RobotScene.svelte';
 	import Render from '$lib/Render.svelte';
-	import RobotData from '$lib/RobotData.svelte';
 	import WebRtc from '$lib/WebRTC.svelte';
-	import PressureChart from '$lib/pressureChart.svelte';
-	import TemperatureChart from '$lib/temperatureChart.svelte';
 	let container: HTMLDivElement;
 	let canvas_overlay: HTMLCanvasElement;
 	let canvas_overlay_renderer: THREE.WebGLRenderer;
