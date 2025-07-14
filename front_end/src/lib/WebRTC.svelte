@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
 
-  export let srcUrl = 'http://192.168.2.80:5176/offer';
+  export let srcUrl = 'http://192.168.2.209:5176/offer';
   export let width = 1920;
   export let height = 1080;
 

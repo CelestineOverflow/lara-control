@@ -13,13 +13,13 @@
 
 	onMount(async () => {
 		
-		// await apiSocketSetup();
-		// await setupSocket();
-		// connectApi();
-		// connect2Demon();
-		// setTimeout(() => {
-		// 	window.location.reload();
-		// }, 1000 * 60 * 30); // 5 minutes
+		await apiSocketSetup();
+		await setupSocket();
+		connectApi();
+		connect2Demon();
+		setTimeout(() => {
+			window.location.reload();
+		}, 1000 * 60 * 30); // 5 minutes
 	});
 
 

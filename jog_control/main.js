@@ -267,7 +267,7 @@ httpServer.listen(PORT, LOCAL_IP, () => {
 app.use(cors({ origin: '*' }));
 app.use(bodyParser());
 // ——— SERIAL PORT SETUP ———
-const dev = new SerialPort({ path: 'COM13', baudRate: 115200 });
+const dev = new SerialPort({ path: 'COM4', baudRate: 115200 });
 //send connected message to serial port
 dev.on('open', () => {
    console.log('Serial port opened');
@@ -277,6 +277,8 @@ const parser = dev.pipe(new ReadlineParser({ delimiter: '\n', encoding: 'utf8' }
 let pressure = 0;
 let stop_Sent = false;
 let temperatureObj = null;
+let lastTimeReport = Date.now();
+const reportInterval = 32; // 1 second
 parser.on('data', line => {
    line = line.trim();
    if (!line) return;
@@ -324,7 +326,11 @@ parser.on('data', line => {
          }
          
       }
-      io.emit('serialData', parsed);
+      
+      if (Date.now() - lastTimeReport > reportInterval) {
+         lastTimeReport = Date.now();
+         io.emit('serialData', parsed);
+      }
    }
    catch (err) {
       console.error('Serial parse error:', err.message);

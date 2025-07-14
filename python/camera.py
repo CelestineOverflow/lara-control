@@ -731,10 +731,10 @@ def	camera_loop():
 		default_width=1920,
 		default_height=1080,
 		default_fps=30,
-		default_bitrate=60000  # 10 Mbps for high quality
+		default_bitrate=100000  # 10 Mbps for high quality
 	)
 	# Add a stream
-	streamer.add_stream("default", 1920, 1080, 30, 60000)
+	streamer.add_stream("default", 1920, 1080, 30, 100000)
 	streamer.start()
 
 	# Some initialization
